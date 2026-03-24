@@ -525,6 +525,10 @@ class EnergaAPI:
         if not token or not url:
             return None
 
+        # Clean up token and url from accidental spaces, newlines or quotes
+        token = token.strip('"\' \n\r')
+        url = url.strip('"\' \n\r')
+
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
@@ -543,8 +547,8 @@ class EnergaAPI:
         today = now.strftime("%Y-%m-%d")
         tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
         
-        # Strip existing query params and add current ones
-        base_url = url.split("?")[0]
+        # Strip existing query params, trailing slashes and add current ones
+        base_url = url.split("?")[0].rstrip("/")
         final_url = f"{base_url}?localDateFrom={today}&localDateTo={tomorrow}"
 
         try:
