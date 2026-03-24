@@ -565,8 +565,8 @@ class EnergaAPI:
                     )
                     return None
                 else:
-                    _LOGGER.warning("Failed to fetch dynamic prices from Energa24: HTTP %d", resp.status)
-                    _LOGGER.debug("Energa24 Error Response: %s", await resp.text())
+                    error_text = await resp.text()
+                    _LOGGER.warning("Failed to fetch dynamic prices from Energa24: HTTP %d. Details: %s", resp.status, error_text)
                     return None
         except Exception as e:
             _LOGGER.error("Error fetching dynamic prices: %s", e)
