@@ -254,9 +254,6 @@ async def async_setup_entry(
                         device_class=device_class,
                     )
                 )
-                
-
-                )
 
     # 5. Energa24 Dynamic Pricing Sensor
     if energa24_token:
