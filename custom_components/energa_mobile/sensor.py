@@ -273,7 +273,7 @@ async def async_setup_entry(
             for s in sensors
         ],
     )
-    async_add_entities(sensors, update_before_add=True)
+    async_add_entities(sensors, update_before_add=False)
 
     # === CLEANUP STALE DEVICES ===
     # Remove devices for meters no longer returned by the API
@@ -282,6 +282,8 @@ async def async_setup_entry(
         str(m.get("meter_serial", m["meter_point_id"]))
         for m in meters_to_process
     }
+    if energa24_token:
+        active_serials.add("energa24_dynamic")
 
     dev_reg = dr.async_get(hass)
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
