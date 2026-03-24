@@ -856,7 +856,12 @@ class EnergaDynamicPriceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Return the current dynamic price based on the current hour."""
         prices = getattr(self.coordinator, "dynamic_prices", None)
+        if prices is None:
+            _LOGGER.debug("EnergaDynamicPriceSensor: dynamic_prices is None in coordinator")
+            return None
+            
         if not prices:
+            _LOGGER.debug("EnergaDynamicPriceSensor: dynamic_prices is empty list")
             return None
             
         from homeassistant.util import dt as dt_util
@@ -909,7 +914,45 @@ class EnergaDynamicPriceSensor(CoordinatorEntity, SensorEntity):
                 })
             except ValueError:
                 continue
+
+        # Sort prices chronologically just in case
+        formatted_prices.sort(key=lambda x: x["start"])
+
+        # Calculate min/max 2-hour windows (8 consecutive 15-min intervals)
+        window_size = 8
+        cheapest_2h = None
+        expensive_2h = None
+
+        if len(formatted_prices) >= window_size:
+            min_avg = float("inf")
+            max_avg = float("-inf")
+
+            for i in range(len(formatted_prices) - window_size + 1):
+                window = formatted_prices[i : i + window_size]
+                total = sum(float(item.get("value", 0)) for item in window if item.get("value") is not None)
+                avg_price = total / window_size
+                
+                start_time = window[0].get("start")
+                end_time = window[-1].get("start")
+
+                if avg_price < min_avg:
+                    min_avg = avg_price
+                    cheapest_2h = {
+                        "start": start_time,
+                        "end": end_time,
+                        "average_price": float(f"{avg_price:.4f}"),
+                    }
+                
+                if avg_price > max_avg:
+                    max_avg = avg_price
+                    expensive_2h = {
+                        "start": start_time,
+                        "end": end_time,
+                        "average_price": float(f"{avg_price:.4f}"),
+                    }
                 
         return {
-            "prices": formatted_prices
+            "prices": formatted_prices,
+            "cheapest_2h": cheapest_2h,
+            "most_expensive_2h": expensive_2h
         }

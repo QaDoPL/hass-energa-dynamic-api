@@ -548,8 +548,9 @@ class EnergaAPI:
             async with self._session.get(final_url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # Return list of dynamicOffers
-                    return data.get("dynamicOffers", [])
+                    offers = data.get("dynamicOffers", [])
+                    _LOGGER.debug("Energa24: Successfully fetched %d dynamic price offers", len(offers))
+                    return offers
                 elif resp.status in (401, 403):
                     _LOGGER.warning(
                         "Energa24 Token expired or invalid (HTTP %d). Please update the token in integration options.", 
@@ -558,6 +559,7 @@ class EnergaAPI:
                     return None
                 else:
                     _LOGGER.warning("Failed to fetch dynamic prices from Energa24: HTTP %d", resp.status)
+                    _LOGGER.debug("Energa24 Error Response: %s", await resp.text())
                     return None
         except Exception as e:
             _LOGGER.error("Error fetching dynamic prices: %s", e)
