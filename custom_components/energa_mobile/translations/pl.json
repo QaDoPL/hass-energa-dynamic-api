@@ -33,6 +33,7 @@
                 "menu_options": {
                     "credentials": "Zmień Login/Hasło",
                     "prices": "Ustaw Ceny Energii",
+                    "energa24": "Taryfa Dynamiczna (Energa24)",
                     "history": "Pobierz Historię Danych",
                     "clear_stats": "Wyczyść Statystyki Panelu Energia"
                 }
@@ -64,6 +65,14 @@
             "clear_stats": {
                 "title": "Czyszczenie Statystyk",
                 "description": "{warning}\n\nCzy chcesz kontynuować?"
+            },
+            "energa24": {
+                "title": "Ustawienia Energa24",
+                "description": "Skonfiguruj ceny taryfy dynamicznej z portalu 24.energa.pl. Wymagany jest token Bearer skopiowany z przeglądarki.",
+                "data": {
+                    "energa24_token": "Token autoryzacyjny (Bearer)",
+                    "dynamic_price_url": "URL API do cen"
+                }
             }
         }
     },

@@ -33,6 +33,7 @@
                 "menu_options": {
                     "credentials": "Change Credentials",
                     "prices": "Set Energy Prices",
+                    "energa24": "Energa24 Dynamic Tariff",
                     "history": "Download History",
                     "clear_stats": "Clear Energy Panel Statistics"
                 }
@@ -64,6 +65,14 @@
             "clear_stats": {
                 "title": "Clear Statistics",
                 "description": "{warning}\n\nDo you want to continue?"
+            },
+            "energa24": {
+                "title": "Energa24 Settings",
+                "description": "Configure dynamic tariff prices from 24.energa.pl. Use a valid Bearer token from your browser.",
+                "data": {
+                    "energa24_token": "Authorization Token (Bearer)",
+                    "dynamic_price_url": "API URL for prices"
+                }
             }
         }
     },
