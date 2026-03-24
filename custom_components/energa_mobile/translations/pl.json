@@ -32,10 +32,10 @@
             "init": {
                 "menu_options": {
                     "credentials": "Zmień Login/Hasło",
-                    "prices": "Ustaw Ceny Energii",
+                    "prices": "Ustaw ceny energii",
                     "energa24": "Taryfa Dynamiczna (Energa24)",
-                    "history": "Pobierz Historię Danych",
-                    "clear_stats": "Wyczyść Statystyki Panelu Energia"
+                    "history": "Pobierz historię",
+                    "clear_stats": "Wyczyść statystyki Panelu Energii"
                 }
             },
             "credentials": {
@@ -51,8 +51,15 @@
                 "data": {
                     "import_price": "Cena za kWh (zużycie) [PLN]",
                     "import_price_1": "Cena za kWh strefa 1 (droga) [PLN]",
-                    "import_price_2": "Cena za kWh strefa 2 (tania) [PLN]",
+                    "import_price_2": "Cena za kWh strefa 2 (poza szczytem) [PLN]",
                     "export_price": "Stawka za kWh (produkcja) [PLN]"
+                }
+            },
+            "energa24": {
+                "title": "Taryfa Dynamiczna Energa24",
+                "description": "Wklej długoterminowy Refresh Token z konsoli przeglądarki, aby zautomatyzować godzinowe stawki. Pozostaw puste, by wyłączyć.",
+                "data": {
+                    "energa24_refresh_token": "Refresh Token (Długowieczna Autoryzacja)"
                 }
             },
             "history": {
@@ -65,14 +72,6 @@
             "clear_stats": {
                 "title": "Czyszczenie Statystyk",
                 "description": "{warning}\n\nCzy chcesz kontynuować?"
-            },
-            "energa24": {
-                "title": "Ustawienia Energa24",
-                "description": "Skonfiguruj ceny taryfy dynamicznej z portalu 24.energa.pl. Wymagany jest token Bearer skopiowany z przeglądarki.",
-                "data": {
-                    "energa24_token": "Token autoryzacyjny (Bearer)",
-                    "dynamic_price_url": "URL API do cen"
-                }
             }
         }
     },
