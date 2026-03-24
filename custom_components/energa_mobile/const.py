@@ -8,8 +8,9 @@ CONF_IMPORT_PRICE = "import_price"  # PLN/kWh for consumption (single-zone G11)
 CONF_EXPORT_PRICE = "export_price"  # PLN/kWh for production compensation
 CONF_IMPORT_PRICE_1 = "import_price_1"  # PLN/kWh zone 1 / peak (G12w)
 CONF_IMPORT_PRICE_2 = "import_price_2"  # PLN/kWh zone 2 / off-peak (G12w)
-CONF_ENERGA24_TOKEN = "energa24_token" # JWT token for Energa24 API (Dynamic Tariff)
-CONF_DYNAMIC_PRICE_URL = "dynamic_price_url" # URL for dynamic prices
+
+# Energa24 Dynamic Pricing
+CONF_ENERGA24_REFRESH_TOKEN = "energa24_refresh_token"
 
 # Default prices (PLN/kWh) - G12w tariff from 2026-01-01
 DEFAULT_IMPORT_PRICE = 1.188
@@ -23,7 +24,6 @@ LOGIN_ENDPOINT = "/apihelper/UserLogin"
 SESSION_ENDPOINT = "/apihelper/SessionStatus"
 DATA_ENDPOINT = "/resources/user/data"
 CHART_ENDPOINT = "/resources/mchart"
-BASE_URL_ENERGA24 = "https://24.energa.pl/api"
 
 # API headers (iOS app user agent)
 HEADERS = {

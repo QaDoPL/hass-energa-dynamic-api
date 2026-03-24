@@ -33,7 +33,7 @@
                 "menu_options": {
                     "credentials": "Change Credentials",
                     "prices": "Set Energy Prices",
-                    "energa24": "Energa24 Dynamic Tariff",
+                    "energa24": "Dynamic Pricing Energa24",
                     "history": "Download History",
                     "clear_stats": "Clear Energy Panel Statistics"
                 }
@@ -55,6 +55,13 @@
                     "export_price": "Rate per kWh (production) [PLN]"
                 }
             },
+            "energa24": {
+                "title": "Energa24 Dynamic Pricing",
+                "description": "Enter the Refresh Token to automatically fetch hourly prices. To disable, clear this field.",
+                "data": {
+                    "energa24_refresh_token": "Refresh Token (Session Auth)"
+                }
+            },
             "history": {
                 "title": "Download History",
                 "description": "**Contract Date:** {contract_date}\n\nSelect start date. Data download runs in background for all meters.",
@@ -65,14 +72,6 @@
             "clear_stats": {
                 "title": "Clear Statistics",
                 "description": "{warning}\n\nDo you want to continue?"
-            },
-            "energa24": {
-                "title": "Energa24 Settings",
-                "description": "Configure dynamic tariff prices from 24.energa.pl. Use a valid Bearer token from your browser.",
-                "data": {
-                    "energa24_token": "Authorization Token (Bearer)",
-                    "dynamic_price_url": "API URL for prices"
-                }
             }
         }
     },

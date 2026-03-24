@@ -6,7 +6,7 @@ Supports multi-zone tariffs (G12w: strefa 1 + strefa 2).
 """
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import override
 from zoneinfo import ZoneInfo
 
@@ -36,9 +36,8 @@ from homeassistant.loader import async_get_integration
 from .api import EnergaAuthError, EnergaConnectionError, EnergaTokenExpiredError
 from .const import (
     DOMAIN,
-    CONF_ENERGA24_TOKEN,
-    CONF_DYNAMIC_PRICE_URL,
     get_price_for_key,
+    CONF_ENERGA24_REFRESH_TOKEN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +53,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up Energa sensors from config entry."""
     api = hass.data[DOMAIN][entry.entry_id]["api"]
+
+    # Initialize Energa24 if refresh token is provided
+    energa24_token = entry.options.get(CONF_ENERGA24_REFRESH_TOKEN)
+    if energa24_token:
+        api.set_energa24_refresh_token(energa24_token)
+        _LOGGER.debug("Energa24 refresh token configured in API")
 
     # Get integration version for device info
     integration = await async_get_integration(hass, DOMAIN)
@@ -250,13 +255,16 @@ async def async_setup_entry(
                     )
                 )
                 
-        # === DYNAMIC PRICE SENSOR ===
-        # Always add the dynamic price sensor if it's configured or available
+
+                )
+
+    # 5. Energa24 Dynamic Pricing Sensor
+    if energa24_token:
+        _LOGGER.info("Energa: Creating Dynamic Price sensor")
         sensors.append(
             EnergaDynamicPriceSensor(
-                coordinator=coordinator,
-                meter_id=meter_id,
-                device_info=device_info,
+                api=api,
+                sw_version=sw_version,
             )
         )
 
@@ -307,8 +315,6 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._hourly_stats: dict = {}  # {meter_id: {"import_1": [...], "import_2": [...], ...}}
         self._pre_fetched_stats: dict = {}  # {entity_id: {"sum": x, "start": dt}}
         self._meter_totals: dict = {}  # {meter_id: {"import_1": x, "import_2": y, ...}}
-        self.dynamic_prices = None  # Store dynamic prices JSON array
-
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
         try:
@@ -356,15 +362,6 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     )
                     self._hourly_stats[meter_id] = {"import": [], "export": []}
 
-            # Fetch Dynamic Prices if configured
-            token24 = self.entry.options.get(CONF_ENERGA24_TOKEN)
-            url24 = self.entry.options.get(CONF_DYNAMIC_PRICE_URL)
-            if token24 and url24:
-                try:
-                    self.dynamic_prices = await self.api.async_get_dynamic_prices(token24, url24)
-                except Exception as e:
-                    _LOGGER.warning("Error updating dynamic prices: %s", e)
-            
             return active_meters
 
         except EnergaTokenExpiredError:
@@ -829,132 +826,95 @@ class EnergaInfoSensor(CoordinatorEntity, SensorEntity):
         return None
 
 
-class EnergaDynamicPriceSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for current dynamic price from Energa24."""
+class EnergaDynamicPriceSensor(SensorEntity):
+    """Sensor showing current dynamic price from Energa24."""
 
-    _attr_has_entity_name = True
-    _attr_state_class = "measurement"
-
-    def __init__(
-        self,
-        coordinator,
-        meter_id: str,
-        device_info: DeviceInfo,
-    ) -> None:
+    def __init__(self, api, sw_version: str) -> None:
         """Initialize dynamic price sensor."""
-        super().__init__(coordinator)
-        self.coordinator = coordinator
-        self.meter_id = meter_id
-        self._attr_device_info = device_info
-        
-        # Unique ID matching the meter ID
-        self._attr_unique_id = f"{meter_id}_dynamic_price"
-        self._attr_name = "Cena energii - Taryfa dynamiczna"
-        
+        self._api = api
+        self._attr_name = "Energa Dynamiczna Cena"
+        self._attr_unique_id = "energa_dynamic_price_energa24"
+        self._attr_has_entity_name = True
+        self._attr_icon = "mdi:chart-line-variant"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "PLN/kWh"
-        self._attr_icon = "mdi:cash-clock"
+        self._attr_suggested_display_precision = 4
+        
+        self._prices = []
+        self._attr_available = False
+        self._last_update = None
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, "energa24_dynamic")},
+            name="Energa24 Taryfa Dynamiczna",
+            manufacturer="Energa-PKP",
+            model="Ceny Dynamiczne",
+            sw_version=sw_version,
+        )
 
     @property
     def native_value(self):
-        """Return the current dynamic price based on the current hour."""
-        prices = getattr(self.coordinator, "dynamic_prices", None)
-        if prices is None:
-            _LOGGER.debug("EnergaDynamicPriceSensor: dynamic_prices is None in coordinator")
+        """Return the price for current hour."""
+        if not self._prices:
             return None
-            
-        if not prices:
-            _LOGGER.debug("EnergaDynamicPriceSensor: dynamic_prices is empty list")
-            return None
-            
-        from homeassistant.util import dt as dt_util
-        now = dt_util.now()
-        current_time_str = now.strftime("%H:%M")
-        today_date = now.strftime("%Y-%m-%d")
         
-        for p in prices:
-            h_from = p.get("hourFrom")
-            h_to = p.get("hourTo")
-            date_val = p.get("date")
-            
-            if date_val == today_date:
-                # Handle 23:45 to 00:00 midnight wrap
-                if h_from == "23:45" and (h_to == "00:00" or h_to == "24:00"):
-                    if current_time_str >= "23:45":
-                        return p.get("grossPrice")
-                elif h_from <= current_time_str < h_to:
-                    return p.get("grossPrice")
-                    
+        now_hour = datetime.now().hour
+        
+        for p in self._prices:
+            # Format in API: "2026-03-24T16:00:00.000+01:00"
+            try:
+                p_dt = datetime.fromisoformat(p["localDate"].replace("Z", "+00:00"))
+                if p_dt.hour == now_hour and p_dt.date() == datetime.now().date():
+                    return float(p["priceValue"])
+            except (KeyError, ValueError, TypeError):
+                continue
         return None
 
     @property
     def extra_state_attributes(self):
-        """Return upcoming prices as attributes for charts."""
-        prices = getattr(self.coordinator, "dynamic_prices", None)
-        if not prices:
-            return {}
-            
-        from homeassistant.util import dt as dt_util
-        from datetime import datetime
-        
-        formatted_prices = []
-        tz = dt_util.DEFAULT_TIME_ZONE
-            
-        for p in prices:
-            date_val = p.get("date")
-            h_from = p.get("hourFrom")
-            if not date_val or not h_from:
-                continue
-                
-            try:
-                dt_naive = datetime.strptime(f"{date_val} {h_from}", "%Y-%m-%d %H:%M")
-                dt_aware = dt_naive.replace(tzinfo=tz)
-                
-                formatted_prices.append({
-                    "start": dt_aware.isoformat(),
-                    "value": p.get("grossPrice"),
-                    "netPrice": p.get("netPrice")
-                })
-            except ValueError:
-                continue
-
-        # Sort prices chronologically just in case
-        formatted_prices.sort(key=lambda x: x["start"])
-
-        # Calculate min/max 2-hour windows (8 consecutive 15-min intervals)
-        window_size = 8
-        cheapest_2h = None
-        expensive_2h = None
-
-        if len(formatted_prices) >= window_size:
-            min_avg = float("inf")
-            max_avg = float("-inf")
-
-            for i in range(len(formatted_prices) - window_size + 1):
-                window = formatted_prices[i : i + window_size]
-                total = sum(float(item.get("value", 0)) for item in window if item.get("value") is not None)
-                avg_price = total / window_size
-                
-                start_time = window[0].get("start")
-                end_time = window[-1].get("start")
-
-                if avg_price < min_avg:
-                    min_avg = avg_price
-                    cheapest_2h = {
-                        "start": start_time,
-                        "end": end_time,
-                        "average_price": float(f"{avg_price:.4f}"),
-                    }
-                
-                if avg_price > max_avg:
-                    max_avg = avg_price
-                    expensive_2h = {
-                        "start": start_time,
-                        "end": end_time,
-                        "average_price": float(f"{avg_price:.4f}"),
-                    }
-                
-        return {
-            "prices": formatted_prices,
-            "cheapest_2h": cheapest_2h,
-            "most_expensive_2h": expensive_2h
+        """Return attributes including 2h windows and future prices."""
+        attrs = {
+            "last_sync": self._last_update,
+            "prices_raw": self._prices,
         }
+        
+        if not self._prices:
+            return attrs
+
+        # Calculate best 2h windows (moving average)
+        windows_2h = []
+        for i in range(len(self._prices) - 1):
+            p1 = self._prices[i]
+            p2 = self._prices[i+1]
+            avg = (float(p1["priceValue"]) + float(p2["priceValue"])) / 2
+            windows_2h.append({
+                "start": p1["localDate"],
+                "end": p2["localDate"],
+                "avg_price": round(avg, 4)
+            })
+        
+        if windows_2h:
+            sorted_windows = sorted(windows_2h, key=lambda x: x["avg_price"])
+            attrs["cheapest_2h_window"] = sorted_windows[0]
+            attrs["most_expensive_2h_window"] = sorted_windows[-1]
+            attrs["windows_2h"] = windows_2h
+
+        return attrs
+
+    async def async_update(self) -> None:
+        """Update sensor data from API."""
+        _LOGGER.debug("Energa24: Updating dynamic prices")
+        try:
+            prices = await self._api.async_get_dynamic_prices()
+            if prices:
+                self._prices = prices
+                self._attr_available = True
+                self._last_update = datetime.now().isoformat()
+                _LOGGER.info("Energa24: Dynamic prices updated (%d points)", len(prices))
+            else:
+                _LOGGER.warning("Energa24: No prices received from API")
+        except Exception as err:
+            _LOGGER.error("Energa24: Update failed: %s", err)
+            self._attr_available = False
+
