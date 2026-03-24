@@ -426,7 +426,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
         # Query last statistic
         try:
-            last_stats = await self.hass.async_add_executor_job(
+            from homeassistant.components import recorder
+            last_stats = await recorder.get_instance(self.hass).async_add_executor_job(
                 get_last_statistics, self.hass, 1, entity_id, True, {"sum"}
             )
 
@@ -490,7 +491,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     entity_id = entity.entity_id
 
                     try:
-                        last_stats = await self.hass.async_add_executor_job(
+                        from homeassistant.components import recorder
+                        last_stats = await recorder.get_instance(self.hass).async_add_executor_job(
                             get_last_statistics,
                             self.hass,
                             1,
