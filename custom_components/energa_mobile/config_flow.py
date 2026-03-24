@@ -25,6 +25,8 @@ from .const import (
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
     DOMAIN,
+    CONF_ENERGA24_TOKEN,
+    CONF_DYNAMIC_PRICE_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,7 +148,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Show options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["credentials", "prices", "history", "clear_stats"],
+            menu_options=["credentials", "prices", "energa24", "history", "clear_stats"],
         )
 
     async def async_step_credentials(self, user_input=None):
@@ -280,6 +282,28 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                     }
                 ),
             )
+
+    async def async_step_energa24(self, user_input=None):
+        """Handle Energa24 dynamic tariff configuration."""
+        if user_input is not None:
+            new_options = {**self._config_entry.options, **user_input}
+            return self.async_create_entry(title="", data=new_options)
+
+        current_token = self._config_entry.options.get(CONF_ENERGA24_TOKEN, "")
+        current_url = self._config_entry.options.get(
+            CONF_DYNAMIC_PRICE_URL, 
+            "https://24.energa.pl/api/accounts/4204825385/price-list-dynamic-offer/590243835015020670/list"
+        )
+
+        return self.async_show_form(
+            step_id="energa24",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_ENERGA24_TOKEN, default=current_token): str,
+                    vol.Optional(CONF_DYNAMIC_PRICE_URL, default=current_url): str,
+                }
+            ),
+        )
 
     async def async_step_history(self, user_input=None):
         """Handle history import from options."""

@@ -36,6 +36,8 @@ from homeassistant.loader import async_get_integration
 from .api import EnergaAuthError, EnergaConnectionError, EnergaTokenExpiredError
 from .const import (
     DOMAIN,
+    CONF_ENERGA24_TOKEN,
+    CONF_DYNAMIC_PRICE_URL,
     get_price_for_key,
 )
 
@@ -247,6 +249,16 @@ async def async_setup_entry(
                         device_class=device_class,
                     )
                 )
+                
+        # === DYNAMIC PRICE SENSOR ===
+        # Always add the dynamic price sensor if it's configured or available
+        sensors.append(
+            EnergaDynamicPriceSensor(
+                coordinator=coordinator,
+                meter_id=meter_id,
+                device_info=device_info,
+            )
+        )
 
     _LOGGER.info("Created %d Energa sensors", len(sensors))
     _LOGGER.debug(
@@ -295,6 +307,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._hourly_stats: dict = {}  # {meter_id: {"import_1": [...], "import_2": [...], ...}}
         self._pre_fetched_stats: dict = {}  # {entity_id: {"sum": x, "start": dt}}
         self._meter_totals: dict = {}  # {meter_id: {"import_1": x, "import_2": y, ...}}
+        self.dynamic_prices = None  # Store dynamic prices JSON array
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -343,6 +356,15 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     )
                     self._hourly_stats[meter_id] = {"import": [], "export": []}
 
+            # Fetch Dynamic Prices if configured
+            token24 = self.entry.options.get(CONF_ENERGA24_TOKEN)
+            url24 = self.entry.options.get(CONF_DYNAMIC_PRICE_URL)
+            if token24 and url24:
+                try:
+                    self.dynamic_prices = await self.api.async_get_dynamic_prices(token24, url24)
+                except Exception as e:
+                    _LOGGER.warning("Error updating dynamic prices: %s", e)
+            
             return active_meters
 
         except EnergaTokenExpiredError:
@@ -541,12 +563,6 @@ class EnergaLiveSensor(CoordinatorEntity, SensorEntity):
             # Compare as strings to avoid type mismatch
             if str(meter.get("meter_point_id")) == str(self._meter_id):
                 value = meter.get(self._data_key)
-                _LOGGER.debug(
-                    "LiveSensor %s: key=%s, value=%s",
-                    self._attr_name,
-                    self._data_key,
-                    value,
-                )
                 if value is not None:
                     try:
                         return float(value)
@@ -809,3 +825,91 @@ class EnergaInfoSensor(CoordinatorEntity, SensorEntity):
             if str(meter.get("meter_point_id")) == str(self._meter_id):
                 return meter.get(self._data_key)
         return None
+
+
+class EnergaDynamicPriceSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for current dynamic price from Energa24."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = "measurement"
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+    ) -> None:
+        """Initialize dynamic price sensor."""
+        super().__init__(coordinator)
+        self.coordinator = coordinator
+        self.meter_id = meter_id
+        self._attr_device_info = device_info
+        
+        # Unique ID matching the meter ID
+        self._attr_unique_id = f"{meter_id}_dynamic_price"
+        self._attr_name = "Cena energii - Taryfa dynamiczna"
+        
+        self._attr_native_unit_of_measurement = "PLN/kWh"
+        self._attr_icon = "mdi:cash-clock"
+
+    @property
+    def native_value(self):
+        """Return the current dynamic price based on the current hour."""
+        prices = getattr(self.coordinator, "dynamic_prices", None)
+        if not prices:
+            return None
+            
+        from homeassistant.util import dt as dt_util
+        now = dt_util.now()
+        current_time_str = now.strftime("%H:%M")
+        today_date = now.strftime("%Y-%m-%d")
+        
+        for p in prices:
+            h_from = p.get("hourFrom")
+            h_to = p.get("hourTo")
+            date_val = p.get("date")
+            
+            if date_val == today_date:
+                # Handle 23:45 to 00:00 midnight wrap
+                if h_from == "23:45" and (h_to == "00:00" or h_to == "24:00"):
+                    if current_time_str >= "23:45":
+                        return p.get("grossPrice")
+                elif h_from <= current_time_str < h_to:
+                    return p.get("grossPrice")
+                    
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        """Return upcoming prices as attributes for charts."""
+        prices = getattr(self.coordinator, "dynamic_prices", None)
+        if not prices:
+            return {}
+            
+        from homeassistant.util import dt as dt_util
+        from datetime import datetime
+        
+        formatted_prices = []
+        tz = dt_util.DEFAULT_TIME_ZONE
+            
+        for p in prices:
+            date_val = p.get("date")
+            h_from = p.get("hourFrom")
+            if not date_val or not h_from:
+                continue
+                
+            try:
+                dt_naive = datetime.strptime(f"{date_val} {h_from}", "%Y-%m-%d %H:%M")
+                dt_aware = dt_naive.replace(tzinfo=tz)
+                
+                formatted_prices.append({
+                    "start": dt_aware.isoformat(),
+                    "value": p.get("grossPrice"),
+                    "netPrice": p.get("netPrice")
+                })
+            except ValueError:
+                continue
+                
+        return {
+            "prices": formatted_prices
+        }

@@ -519,3 +519,34 @@ class EnergaAPI:
                 raise EnergaConnectionError(str(err)) from err
         # Should not reach here, but safety net
         raise EnergaConnectionError("Max retries exceeded in _api_get")
+
+    async def async_get_dynamic_prices(self, token: str, url: str) -> dict | None:
+        """Fetch dynamic prices from Energa24 API."""
+        if not token or not url:
+            return None
+
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "X-Client-Type": "WEB",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        try:
+            async with self._session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Return list of dynamicOffers
+                    return data.get("dynamicOffers", [])
+                elif resp.status in (401, 403):
+                    _LOGGER.warning(
+                        "Energa24 Token expired or invalid (HTTP %d). Please update the token in integration options.", 
+                        resp.status
+                    )
+                    return None
+                else:
+                    _LOGGER.warning("Failed to fetch dynamic prices from Energa24: HTTP %d", resp.status)
+                    return None
+        except Exception as e:
+            _LOGGER.error("Error fetching dynamic prices: %s", e)
+            return None
