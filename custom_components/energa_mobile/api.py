@@ -532,8 +532,20 @@ class EnergaAPI:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
+        from homeassistant.util import dt as dt_util
+        from datetime import timedelta
+        
+        # Ensure URL has the correct dates for today and tomorrow
+        now = dt_util.now()
+        today = now.strftime("%Y-%m-%d")
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # Strip existing query params and add current ones
+        base_url = url.split("?")[0]
+        final_url = f"{base_url}?localDateFrom={today}&localDateTo={tomorrow}"
+
         try:
-            async with self._session.get(url, headers=headers) as resp:
+            async with self._session.get(final_url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     # Return list of dynamicOffers
