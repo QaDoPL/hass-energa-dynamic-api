@@ -2,7 +2,7 @@
   <img src="logo.png" alt="Energa My Meter API Logo" width="300"/>
 </div>
 
-<h1 align="center">Energa My Meter API Integration for Home Assistant</h1>
+<h1 align="center">Energa My Meter API Integration for Home Assistant with Dynamic Prices</h1>
 
 
 ![GitHub Release](https://img.shields.io/github/v/release/ergo5/hass-energa-my-meter-api)
