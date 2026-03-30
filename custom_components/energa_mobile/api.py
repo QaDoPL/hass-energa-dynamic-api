@@ -1,6 +1,8 @@
 """API interface for Energa My Meter."""
 
 import asyncio
+import base64
+import json
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -594,6 +596,23 @@ class EnergaAPI:
         self._energa24_account_id = account_id
         self._energa24_price_list_id = price_list_id
 
+    @staticmethod
+    def _extract_keycloak_id(access_token: str) -> str:
+        """Extract 'sub' (KeycloakId) from JWT access token."""
+        try:
+            parts = access_token.split(".")
+            if len(parts) != 3:
+                return ""
+            payload_b64 = parts[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            payload = base64.urlsafe_b64decode(payload_b64)
+            data = json.loads(payload)
+            return data.get("sub", "")
+        except Exception:
+            return ""
+
     async def async_get_dynamic_prices(self) -> list | None:
         """Fetch dynamic prices from Energa24 using configured IDs."""
         access_token = await self.async_refresh_energa24_token()
@@ -611,11 +630,14 @@ class EnergaAPI:
         params = {"localDateFrom": today, "localDateTo": tomorrow}
 
         headers = {
-            "Accept": "application/json, text/plain, */*",
+            "Accept": "*/*",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {access_token}",
+            "KeycloakId": self._extract_keycloak_id(access_token),
             "X-Client-Type": "WEB",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://24.energa.pl/",
+            "Origin": "https://24.energa.pl",
         }
 
         try:
