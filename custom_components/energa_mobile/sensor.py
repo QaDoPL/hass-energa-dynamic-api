@@ -920,38 +920,91 @@ class EnergaDynamicPriceSensor(SensorEntity):
             attrs["current_net_price"] = slot.get("netPrice")
             attrs["offer_name"] = slot.get("offerName", "")
 
-        # Calculate cheapest/most expensive hours (group 15-min into 1h)
+        # Sort prices chronologically
+        try:
+            sorted_prices = sorted(self._prices, key=lambda p: f"{p.get('date', '')} {p.get('hourFrom', '')}")
+        except Exception:
+            sorted_prices = self._prices
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        today_prices = []
+        tomorrow_prices = []
+        all_prices = []
+
+        for p in sorted_prices:
+            try:
+                gross = float(p.get("grossPrice", 0))
+                all_prices.append(gross)
+                if p.get("date") == today_str:
+                    today_prices.append(gross)
+                elif p.get("date") == tomorrow_str:
+                    tomorrow_prices.append(gross)
+            except (ValueError, TypeError):
+                continue
+
+        # Day stats
+        if today_prices:
+            attrs["today_min_price"] = round(min(today_prices), 4)
+            attrs["today_max_price"] = round(max(today_prices), 4)
+            attrs["today_avg_price"] = round(sum(today_prices) / len(today_prices), 4)
+
+        if tomorrow_prices:
+            attrs["tomorrow_min_price"] = round(min(tomorrow_prices), 4)
+            attrs["tomorrow_max_price"] = round(max(tomorrow_prices), 4)
+            attrs["tomorrow_avg_price"] = round(sum(tomorrow_prices) / len(tomorrow_prices), 4)
+            attrs["has_tomorrow_data"] = True
+        else:
+            attrs["has_tomorrow_data"] = False
+
+        if all_prices:
+            attrs["overall_min_price"] = round(min(all_prices), 4)
+            attrs["overall_max_price"] = round(max(all_prices), 4)
+
+        # 2-hour sliding windows (each 2h is 8 x 15-min slots)
+        window_size = 8
+        windows_2h = []
+        if len(sorted_prices) >= window_size:
+            for i in range(len(sorted_prices) - window_size + 1):
+                window_slots = sorted_prices[i:i + window_size]
+                try:
+                    w_prices = [float(s.get("grossPrice", 0)) for s in window_slots]
+                    avg_price = sum(w_prices) / window_size
+                    windows_2h.append({
+                        "start": f"{window_slots[0]['date']} {window_slots[0]['hourFrom']}",
+                        "end": f"{window_slots[-1]['date']} {window_slots[-1]['hourTo']}",
+                        "avg_price": round(avg_price, 4)
+                    })
+                except (KeyError, ValueError, TypeError):
+                    continue
+
+        if windows_2h:
+            sorted_2h = sorted(windows_2h, key=lambda w: w["avg_price"])
+            attrs["cheapest_2h_window"] = sorted_2h[0]
+            attrs["most_expensive_2h_window"] = sorted_2h[-1]
+
+        # Detailed Hourly stats
         hourly = {}
         for p in self._prices:
             try:
                 hour_key = f"{p['date']} {p['hourFrom'][:2]}:00"
                 if hour_key not in hourly:
-                    hourly[hour_key] = {"prices": [], "date": p["date"], "hour": p["hourFrom"][:2]}
-                hourly[hour_key]["prices"].append(float(p.get("grossPrice", 0)))
+                    hourly[hour_key] = []
+                hourly[hour_key].append(float(p.get("grossPrice", 0)))
             except (KeyError, ValueError, TypeError):
                 continue
 
         hourly_avg = []
-        for key, data in hourly.items():
-            avg = sum(data["prices"]) / len(data["prices"])
-            hourly_avg.append({"hour": key, "avg_price": round(avg, 4)})
+        for key, prices in hourly.items():
+            if prices:
+                avg = sum(prices) / len(prices)
+                hourly_avg.append({"hour": key, "avg_price": round(avg, 4)})
 
         if hourly_avg:
             sorted_hours = sorted(hourly_avg, key=lambda x: x["avg_price"])
             attrs["cheapest_hour"] = sorted_hours[0]
             attrs["most_expensive_hour"] = sorted_hours[-1]
-
-        # Today's min/max gross prices
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        today_prices = [
-            float(p.get("grossPrice", 0))
-            for p in self._prices
-            if p.get("date") == today_str
-        ]
-        if today_prices:
-            attrs["today_min_price"] = round(min(today_prices), 4)
-            attrs["today_max_price"] = round(max(today_prices), 4)
-            attrs["today_avg_price"] = round(sum(today_prices) / len(today_prices), 4)
 
         return attrs
 
