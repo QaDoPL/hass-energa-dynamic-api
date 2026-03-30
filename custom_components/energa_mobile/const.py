@@ -16,11 +16,14 @@ CONF_ENERGA24_PRICE_LIST_ID = "energa24_price_list_id"
 DEFAULT_ENERGA24_ACCOUNT_ID = "4204825385"
 DEFAULT_ENERGA24_PRICE_LIST_ID = "590243835015020670"
 
+CONF_PROSUMER_COEFFICIENT = "prosumer_coefficient"  # Net billing coefficient (0.0-1.0)
+
 # Default prices (PLN/kWh) - G12w tariff from 2026-01-01
 DEFAULT_IMPORT_PRICE = 1.188
 DEFAULT_IMPORT_PRICE_1 = 1.2453  # Zone 1 (peak)
 DEFAULT_IMPORT_PRICE_2 = 0.5955  # Zone 2 (off-peak)
 DEFAULT_EXPORT_PRICE = 0.95
+DEFAULT_PROSUMER_COEFFICIENT = 0.8
 
 # API endpoints
 BASE_URL = "https://api-mojlicznik.energa-operator.pl/dp"
@@ -55,6 +58,8 @@ def get_price_for_key(
         "import_1": (CONF_IMPORT_PRICE_1, DEFAULT_IMPORT_PRICE_1),
         "import_2": (CONF_IMPORT_PRICE_2, DEFAULT_IMPORT_PRICE_2),
         "export": (CONF_EXPORT_PRICE, DEFAULT_EXPORT_PRICE),
+        "export_1": (CONF_EXPORT_PRICE, DEFAULT_EXPORT_PRICE),
+        "export_2": (CONF_EXPORT_PRICE, DEFAULT_EXPORT_PRICE),
     }
 
     conf_key, default_val = key_map.get(

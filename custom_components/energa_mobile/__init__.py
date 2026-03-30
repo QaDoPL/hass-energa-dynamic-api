@@ -9,20 +9,19 @@ Clean rebuild with simplified architecture:
 import asyncio
 import logging
 import secrets
-
-import aiohttp
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import aiohttp
 import voluptuous as vol
 from homeassistant.components import persistent_notification
-from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
 from homeassistant.components.recorder.models import (
     StatisticMeanType,
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import async_import_statistics
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_CLOSE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.util import dt as dt_util
@@ -73,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await session.close()
         raise ConfigEntryAuthFailed(err) from err
     except EnergaTokenExpiredError:
-        _LOGGER.warning("Token expired during setup, retrying login")
+        _LOGGER.debug("Token expired during setup, retrying login")
         try:
             await asyncio.wait_for(api.async_login(), timeout=30)
         except asyncio.TimeoutError:
@@ -184,7 +183,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        # Close dedicated sessions
+        # Close dedicated session
         if isinstance(entry_data, dict):
             if "session" in entry_data:
                 await entry_data["session"].close()
@@ -242,6 +241,8 @@ async def _import_meter_history(
         import_1_points = []
         import_2_points = []
         export_points = []
+        export_1_points = []
+        export_2_points = []
 
         for day_offset in range(days):
             target_day = (start_date + timedelta(days=day_offset)).replace(
@@ -286,6 +287,18 @@ async def _import_meter_history(
                 if hourly_value is not None and hourly_value >= 0:
                     hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
                     export_points.append({"dt": hour_dt, "value": hourly_value})
+
+            # Process zone-specific export data
+            if has_zones:
+                for hour_idx, hourly_value in enumerate(day_data.get("export_1", [])):
+                    if hourly_value is not None and hourly_value >= 0:
+                        hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
+                        export_1_points.append({"dt": hour_dt, "value": hourly_value})
+
+                for hour_idx, hourly_value in enumerate(day_data.get("export_2", [])):
+                    if hourly_value is not None and hourly_value >= 0:
+                        hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
+                        export_2_points.append({"dt": hour_dt, "value": hourly_value})
 
         # Extend import to today to prevent sum discontinuity with live stats.
         # Without this, partial imports (e.g., from March 1) create a gap:
@@ -340,12 +353,26 @@ async def _import_meter_history(
                         hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
                         export_points.append({"dt": hour_dt, "value": hourly_value})
 
+                if has_zones:
+                    for hour_idx, hourly_value in enumerate(day_data.get("export_1", [])):
+                        if hourly_value is not None and hourly_value >= 0:
+                            hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
+                            export_1_points.append({"dt": hour_dt, "value": hourly_value})
+
+                    for hour_idx, hourly_value in enumerate(day_data.get("export_2", [])):
+                        if hourly_value is not None and hourly_value >= 0:
+                            hour_dt = dt_util.as_utc(day_start + timedelta(hours=hour_idx))
+                            export_2_points.append({"dt": hour_dt, "value": hourly_value})
+
         _LOGGER.info(
             "Collected data for meter %s: %d import, %d export%s",
             serial,
             len(import_points),
             len(export_points),
-            f", zone1={len(import_1_points)}, zone2={len(import_2_points)}"
+            (
+                f", imp_z1={len(import_1_points)}, imp_z2={len(import_2_points)}"
+                f", exp_z1={len(export_1_points)}, exp_z2={len(export_2_points)}"
+            )
             if has_zones
             else "",
         )
@@ -361,6 +388,21 @@ async def _import_meter_history(
 
             # Forward calculation from zero - sort oldest first
             points.sort(key=lambda x: x["dt"])
+
+            # Merge duplicate UTC timestamps (DST spring-forward gap:
+            # local 02:00 doesn't exist, so hour_idx 2 and 3 both map
+            # to the same UTC hour after as_utc() conversion)
+            merged: list[dict] = []
+            for point in points:
+                if merged and merged[-1]["dt"] == point["dt"]:
+                    merged[-1]["value"] += point["value"]
+                    _LOGGER.debug(
+                        "DST dedup: merged %.3f kWh into %s (total %.3f)",
+                        point["value"], point["dt"], merged[-1]["value"],
+                    )
+                else:
+                    merged.append(dict(point))
+            points = merged
 
             running_sum = 0.0
             statistics = []
@@ -405,6 +447,8 @@ async def _import_meter_history(
                 "import_1": "panel_energia_strefa_1",
                 "import_2": "panel_energia_strefa_2",
                 "export": "panel_energia_produkcja",
+                "export_1": "panel_energia_produkcja_strefa_1",
+                "export_2": "panel_energia_produkcja_strefa_2",
             }
             energy_sensor_name = suffix_to_name.get(
                 entity_suffix, f"panel_{entity_suffix}"
@@ -435,6 +479,8 @@ async def _import_meter_history(
                 "import_1": "Panel Energia Strefa 1 Koszt",
                 "import_2": "Panel Energia Strefa 2 Koszt",
                 "export": "Panel Energia Produkcja Rekompensata",
+                "export_1": "Panel Energia Produkcja Strefa 1 Rekompensata",
+                "export_2": "Panel Energia Produkcja Strefa 2 Rekompensata",
             }
             cost_name = cost_name_map.get(entity_suffix, f"Koszt {entity_suffix}")
 
@@ -463,14 +509,16 @@ async def _import_meter_history(
         if has_zones:
             count_1 = build_statistics(import_1_points, "import_1", entry)
             count_2 = build_statistics(import_2_points, "import_2", entry)
-            count_export = build_statistics(export_points, "export", entry)
-            total_count = count_1 + count_2 + count_export
+            count_exp1 = build_statistics(export_1_points, "export_1", entry)
+            count_exp2 = build_statistics(export_2_points, "export_2", entry)
+            total_count = count_1 + count_2 + count_exp1 + count_exp2
 
             persistent_notification.async_create(
                 hass,
                 f"Zakończono import dla licznika {serial}\n"
                 f"Zaimportowano {total_count} punktów danych\n"
-                f"(Strefa 1: {count_1}, Strefa 2: {count_2}, Export: {count_export})",
+                f"(Import S1: {count_1}, S2: {count_2}, "
+                f"Export S1: {count_exp1}, S2: {count_exp2})",
                 title="Energa: Sukces",
                 notification_id=f"energa_import_{meter_id}",
             )

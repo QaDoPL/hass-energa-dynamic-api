@@ -4,12 +4,11 @@ import asyncio
 import base64
 import json
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import aiohttp
-import time
-from datetime import datetime, timedelta
 
 from .const import (
     BASE_URL,
@@ -204,6 +203,14 @@ class EnergaAPI:
             result["export"] = await self._fetch_chart(
                 meter["meter_point_id"], meter["obis_minus"], ts
             )
+            # Per-zone export for G12w
+            if meter.get("zone_count", 1) > 1:
+                result["export_1"] = await self._fetch_chart(
+                    meter["meter_point_id"], meter["obis_minus"], ts, zone_index=0
+                )
+                result["export_2"] = await self._fetch_chart(
+                    meter["meter_point_id"], meter["obis_minus"], ts, zone_index=1
+                )
 
         _LOGGER.debug(
             "History %s (ts=%s): Import=%d pts, Export=%d pts",
@@ -263,7 +270,7 @@ class EnergaAPI:
         # Collect hourly data points
         keys = ["import", "export"]
         if has_zones:
-            keys.extend(["import_1", "import_2"])
+            keys.extend(["import_1", "import_2", "export_1", "export_2"])
         all_points = {k: [] for k in keys}
 
         for day_offset in range(days_to_fetch):
@@ -306,7 +313,12 @@ class EnergaAPI:
             len(all_points["import"]),
             len(all_points["export"]),
             start_date.date(),
-            f", zone1={len(all_points.get('import_1', []))}, zone2={len(all_points.get('import_2', []))}"
+            (
+                f", imp_z1={len(all_points.get('import_1', []))}"
+                f", imp_z2={len(all_points.get('import_2', []))}"
+                f", exp_z1={len(all_points.get('export_1', []))}"
+                f", exp_z2={len(all_points.get('export_2', []))}"
+            )
             if has_zones
             else "",
         )
@@ -472,6 +484,9 @@ class EnergaAPI:
                 await self.async_login()
 
             url = f"{BASE_URL}{path}"
+
+            # Build params INSIDE the loop so that after re-login
+            # the fresh token is used (fixes stale token on retry)
             final_params = params.copy() if params else {}
             if self._token and "token" not in final_params:
                 final_params["token"] = self._token
@@ -482,7 +497,7 @@ class EnergaAPI:
                 ) as resp:
                     if resp.status in (401, 403):
                         if attempt == 0:
-                            _LOGGER.warning(
+                            _LOGGER.debug(
                                 "Token expired (HTTP %d), re-logging in", resp.status
                             )
                             await self.async_login()

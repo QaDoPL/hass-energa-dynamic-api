@@ -8,6 +8,7 @@ import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -22,6 +23,7 @@ from .const import (
     CONF_ENERGA24_ACCOUNT_ID,
     CONF_ENERGA24_PRICE_LIST_ID,
     CONF_PASSWORD,
+    CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
@@ -29,6 +31,7 @@ from .const import (
     DEFAULT_IMPORT_PRICE_2,
     DEFAULT_ENERGA24_ACCOUNT_ID,
     DEFAULT_ENERGA24_PRICE_LIST_ID,
+    DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
 )
 
@@ -76,6 +79,8 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise  # Let HA handle "already_configured" etc.
             except Exception:
                 _LOGGER.exception("Unexpected error during setup")
                 errors["base"] = "unknown"
@@ -126,6 +131,8 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
             except Exception:
                 _LOGGER.exception("Unexpected error during reauth")
                 errors["base"] = "unknown"
@@ -186,6 +193,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "invalid_auth"
             except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
                 errors["base"] = "cannot_connect"
+            except AbortFlow:
+                raise
             except Exception:
                 _LOGGER.exception("Unexpected error during credential update")
                 errors["base"] = "unknown"
@@ -246,6 +255,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
 
         # Get current values from options
         current_export = self._config_entry.options.get(CONF_EXPORT_PRICE, DEFAULT_EXPORT_PRICE)
+        current_coeff = self._config_entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
 
         if has_zones:
             # G12w: show zone-specific prices
@@ -265,6 +275,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Required(
                             CONF_EXPORT_PRICE, default=current_export
                         ): vol.Coerce(float),
+                        vol.Required(
+                            CONF_PROSUMER_COEFFICIENT, default=current_coeff
+                        ): vol.Coerce(float),
                     }
                 ),
             )
@@ -281,6 +294,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         ): vol.Coerce(float),
                         vol.Required(
                             CONF_EXPORT_PRICE, default=current_export
+                        ): vol.Coerce(float),
+                        vol.Required(
+                            CONF_PROSUMER_COEFFICIENT, default=current_coeff
                         ): vol.Coerce(float),
                     }
                 ),
@@ -404,8 +420,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             entity_registry = er.async_get(self.hass)
 
             # Find all Energa Panel Energia sensors (energy statistics only)
-            # These have "panel_energia_zuzycie" or "panel_energia_produkcja" in entity_id
-            # and "_stats" marker in unique_id (identifies Panel Energia sensors)
+            # Matched by entity_id substrings: panel_energia_zuzycie, panel_energia_produkcja, panel_energia_strefa
             statistic_ids = [
                 entity.entity_id
                 for entity in entity_registry.entities.values()
