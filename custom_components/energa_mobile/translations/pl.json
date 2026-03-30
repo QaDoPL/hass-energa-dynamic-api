@@ -57,9 +57,11 @@
             },
             "energa24": {
                 "title": "Taryfa Dynamiczna Energa24",
-                "description": "Wklej długoterminowy Refresh Token z konsoli przeglądarki, aby zautomatyzować godzinowe stawki. Pozostaw puste, by wyłączyć.",
+                "description": "Wklej Refresh Token z konsoli przeglądarki. Account ID i Price List ID są wstępnie wypełnione; zmień tylko jeśli to konieczne.",
                 "data": {
-                    "energa24_refresh_token": "Refresh Token (Długowieczna Autoryzacja)"
+                    "energa24_refresh_token": "Refresh Token (Długowieczna Autoryzacja)",
+                    "energa24_account_id": "Account ID (Energa24)",
+                    "energa24_price_list_id": "Price List ID (PPE)"
                 }
             },
             "history": {

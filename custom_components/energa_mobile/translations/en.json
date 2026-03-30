@@ -57,9 +57,11 @@
             },
             "energa24": {
                 "title": "Energa24 Dynamic Pricing",
-                "description": "Enter the Refresh Token to automatically fetch hourly prices. To disable, clear this field.",
+                "description": "Enter the Refresh Token to automatically fetch hourly prices. Account ID and Price List ID are pre-filled; change only if needed.",
                 "data": {
-                    "energa24_refresh_token": "Refresh Token (Session Auth)"
+                    "energa24_refresh_token": "Refresh Token (Session Auth)",
+                    "energa24_account_id": "Account ID (Energa24)",
+                    "energa24_price_list_id": "Price List ID (PPE)"
                 }
             },
             "history": {
