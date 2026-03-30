@@ -7,66 +7,66 @@
 
 ![GitHub Release](https://img.shields.io/github/v/release/ergo5/hass-energa-my-meter-api)
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
-![API](https://img.shields.io/badge/data_source-Native_API-blue?logo=fastapi)
+![API](https://img.shields.io/badge/data_source-Native_API-blue)
 
 🇵🇱 This integration is designed for customers of **Energa Operator** — a regional electricity distributor serving **northern Poland** (Pomorze, Warmia-Mazury, Kujawsko-Pomorskie).
 
-A robust integration for **Energa Operator** in Home Assistant that communicates via the **native API** — **not web scraping**. It retrieves data directly from the "Mój Licznik" API and integrates seamlessly with the **Energy Dashboard**. Features **self-healing history import**, **automatic cost calculation**, and correct cumulative statistics.
-
----
-
-## 📡 Native API
-
-This integration communicates directly with Energa's **native REST API** (`api-mojlicznik.energa-operator.pl`).
-
-*   🔗 **Direct API communication** — lightweight JSON responses, no HTML parsing
-*   🔐 **Token-based authentication** with automatic session refresh
-*   📦 **Structured data** — precise meter readings and hourly charts straight from the source
-*   🔄 **Stable interface** — based on a structured API backend, not website layout
+A robust integration for **Energa Operator** in Home Assistant that communicates directly with the **native REST API** — **not web scraping**. It retrieves data from the "Mój Licznik" portal and integrates seamlessly with the **Energy Dashboard**. Features **self-healing history import**, **automatic cost calculation**, and reliable cumulative statistics.
 
 > [!TIP]
 > For technical details about the API endpoints, see [ENERGA_API_REFERENCE.md](docs/ENERGA_API_REFERENCE.md).
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
-*   **📡 Native API:** Direct communication with Energa's REST API — no HTML parsing, stable JSON interface.
-*   **📊 Energy Dashboard Ready:** Dedicated sensors (`Panel Energia`) designed specifically for correct statistics.
-*   **💰 Automatic Cost Calculation:** Calculates energy costs in PLN based on configured prices.
-*   **🛡️ Forward-From-Zero Statistics:** Monotonically increasing sums with spike guard protection.
-*   **⚡ Hourly Granularity:** Precise hourly consumption/production tracking.
-*   **🔌 Multi-Zone Tariffs (G12/G12w):** Automatic detection of two-zone meters with separate peak/off-peak tracking.
-*   **🛠️ Auto-Repair (Self-Healing):** The "Download History" feature automatically fixes gaps and corrupted data.
-*   **🔍 OBIS Auto-Detect:** Automatically identifies usage (1.8.0) and production (2.8.0).
-
----
-
-## 💰 Cost Calculation
-
-The integration **automatically calculates energy costs** and displays them in the Energy Dashboard in **PLN (złoty)**.
-
-**How it works:**
-- When you configure energy prices (see below), the integration creates cost sensors
-- Cost sensors: `*_energa_zuzycie_cost` (consumption), `*_energa_produkcja_cost` (production)
-- These sensors work seamlessly with the Energy Dashboard to show costs alongside energy usage
-
-> [!NOTE]
-> **Two-zone tariffs** (G12, G12w, G12r) are fully supported with separate zone pricing. Three-zone tariffs (G13) are not currently supported.
+*   ** Native API:** Direct communication with Energa's REST API — lightweight JSON responses, stable interface.
+*   ** Energy Dashboard Ready:** Dedicated sensors (`Panel Energia`) designed specifically for correct statistics.
+*   ** Automatic Cost Calculation:** Calculates energy costs in PLN based on configured prices.
+*   ** Reliable Statistics:** Spike-free Energy Dashboard — data is always consistent.
+*   ** Hourly Granularity:** Precise hourly consumption/production tracking.
+*   ** Multi-Zone Tariffs (G12/G12w):** Automatic detection of two-zone meters with separate peak/off-peak tracking for both import and export.
+*   ** Prosumer Balance:** Tracks net billing balance with configurable coefficient (default 0.8).
+*   ** Auto-Repair (Self-Healing):** The "Download History" feature automatically fixes gaps and corrupted data.
+*   ** Auto-Detect:** Automatically identifies consumption and production meters.
 
 ---
 
-## 📦 Installation
+##  Installation
 
-### Option 1: HACS (Recommended)
+### HACS (Recommended)
 1.  Open **HACS** → **Integrations**.
 2.  Search for **Energa My Meter**.
 3.  Click **Install** and restart Home Assistant.
 
+<details>
+<summary>Manual Installation</summary>
+
+1. Download the latest release from [GitHub Releases](https://github.com/ergo5/hass-energa-my-meter-api/releases)
+2. Copy the `custom_components/energa_mobile` folder to your `config/custom_components/` directory
+3. Restart Home Assistant
+
+</details>
+
 ### Configuration
-1.  Go to **Settings** -> **Devices & Services**.
-2.  Add Integration -> Search for **Energa My Meter**.
-3.  Login With your **Energa Mój Licznik** credentials.
+1.  Go to **Settings** → **Devices & Services**.
+2.  Click **Add Integration** → search for **Energa My Meter**.
+3.  Log in with your **Energa Mój Licznik** credentials.
+
+---
+
+##  Cost Calculation
+
+The integration **automatically calculates energy costs** and displays them in the Energy Dashboard in **PLN (złoty)**.
+
+**How it works:**
+- When you configure energy prices (see below), the integration automatically creates cost statistics
+- Import costs use the suffix **Koszt** (e.g., `Panel Energia Zużycie Koszt`)
+- Export compensation uses the suffix **Rekompensata** (e.g., `Panel Energia Produkcja Rekompensata`)
+- These sensors work seamlessly with the Energy Dashboard to show costs alongside energy usage
+
+> [!NOTE]
+> **Two-zone tariffs** (G12, G12w, G12r) are fully supported with separate zone pricing. Three-zone tariffs (G13) are not currently supported.
 
 ---
 
@@ -85,34 +85,44 @@ To enable cost calculation, you must configure energy prices:
 | **G12/G12w** zone 1 (peak) | Import Zone 1 | 1.2453 |
 | **G12/G12w** zone 2 (off-peak) | Import Zone 2 | 0.5955 |
 | All tariffs | Export | 0.95 |
+| Prosumer accounts | Prosumer coefficient | 0.8 (80%) |
 
 > [!TIP]
 > The options form automatically adapts to your tariff — two-zone meters (G12/G12w) will see zone-specific fields, single-zone meters (G11) will see a single import price.
 
 ---
 
-## 📡 Available Sensors
+## 📋 Available Sensors
 
 The integration creates multiple sensors organized by function:
 
 ### Energy Dashboard Sensors (Panel Energia)
 **Use these for the Energy Dashboard:**
 
+> [!NOTE]
+> Panel Energia sensors show **"unknown"** in the entity list — this is normal. Their data appears only in the **Energy Dashboard**, not as a live state.
+
+#### Single-Zone (G11)
+
 | Sensor Name | Description | Purpose |
 |-------------|-------------|---------|
 | `Panel Energia Zużycie` | Cumulative consumption | Grid Consumption in Dashboard |
 | `Panel Energia Produkcja` | Cumulative production | Return to Grid in Dashboard |
-| `Panel Energia Zużycie Cost` | Consumption cost (PLN) | Auto-created for cost tracking |
-| `Panel Energia Produkcja Cost` | Production compensation (PLN) | Auto-created for cost tracking |
+| `Panel Energia Zużycie Koszt` | Consumption cost (PLN) | Auto-created for cost tracking |
+| `Panel Energia Produkcja Rekompensata` | Production compensation (PLN) | Auto-created for cost tracking |
 
-#### Multi-Zone Sensors (auto-created for G12/G12w tariffs)
+#### Multi-Zone (G12/G12w) — auto-created for two-zone tariffs
 
 | Sensor Name | Description | Purpose |
 |-------------|-------------|---------|
-| `Panel Energia Strefa 1` | Peak zone consumption | Zone 1 tracking in Dashboard |
-| `Panel Energia Strefa 2` | Off-peak zone consumption | Zone 2 tracking in Dashboard |
-| `Panel Energia Strefa 1 Cost` | Peak zone cost (PLN) | Zone 1 cost tracking |
-| `Panel Energia Strefa 2 Cost` | Off-peak zone cost (PLN) | Zone 2 cost tracking |
+| `Panel Energia Strefa 1` | Peak zone consumption | Zone 1 import in Dashboard |
+| `Panel Energia Strefa 2` | Off-peak zone consumption | Zone 2 import in Dashboard |
+| `Panel Energia Strefa 1 Koszt` | Peak zone cost (PLN) | Zone 1 cost tracking |
+| `Panel Energia Strefa 2 Koszt` | Off-peak zone cost (PLN) | Zone 2 cost tracking |
+| `Panel Energia Produkcja Strefa 1` | Peak zone production | Zone 1 export in Dashboard |
+| `Panel Energia Produkcja Strefa 2` | Off-peak zone production | Zone 2 export in Dashboard |
+| `Panel Energia Produkcja Strefa 1 Rekompensata` | Peak zone compensation (PLN) | Zone 1 export cost |
+| `Panel Energia Produkcja Strefa 2 Rekompensata` | Off-peak zone compensation (PLN) | Zone 2 export cost |
 
 ### Daily Sensors
 | Sensor Name | Description |
@@ -137,11 +147,16 @@ The integration creates multiple sensors organized by function:
 
 *Only available for prosumer accounts
 
+### Prosumer Sensors (auto-created for prosumer accounts)
+| Sensor Name | Description |
+|-------------|-------------|
+| `Bilans Prosumencki` | Net billing balance (export × coeff − import) in kWh |
+
 ---
 
-## 📊 Energy Dashboard Setup
+##  Energy Dashboard Setup
 
-To see correctly calculated statistics **and costs** in the Energy Dashboard, you MUST select the specific sensors labeled with **"(Panel Energia)"**.
+To see correctly calculated statistics **and costs** in the Energy Dashboard, you MUST select the specific sensors labeled **"Panel Energia"**.
 
 ### Step 1: Configure Grid Consumption
 
@@ -149,15 +164,23 @@ To see correctly calculated statistics **and costs** in the Energy Dashboard, yo
 
 *Example configuration showing Panel Energia sensors with cost tracking*
 
-| Dashboard Section | Correct Sensor | Cost Sensor |
-| :--- | :--- | :--- |
-| **Grid Consumption** (Pobór z sieci) | **Energa [ID] Panel Energia Zużycie** | **Energa [ID] Panel Energia Zużycie Cost** |
-| **Return to Grid** (Oddawanie do sieci) | **Energa [ID] Panel Energia Produkcja** | **Energa [ID] Panel Energia Produkcja Cost** |
+### Single-Zone Tariff (G11)
 
-> [!IMPORTANT]
-> **Do NOT use:**
-> - `Energa Zużycie Dziś` or `Stan Licznika` for the Energy Dashboard
-> - Only sensors marked **(Panel Energia)** are designed for statistics
+| Dashboard Section | Energy Sensor | Cost Sensor |
+|:---|:---|:---|
+| **Grid Consumption** (Pobór z sieci) | Panel Energia Zużycie | Panel Energia Zużycie Koszt |
+| **Return to Grid** (Oddawanie do sieci) | Panel Energia Produkcja | Panel Energia Produkcja Rekompensata |
+
+### Multi-Zone Tariff (G12 / G12w)
+
+For two-zone tariffs, add **each zone separately**:
+
+| Dashboard Section | Energy Sensor | Cost Sensor |
+|:---|:---|:---|
+| **Grid Consumption** (zone 1 — peak) | Panel Energia Strefa 1 | Panel Energia Strefa 1 Koszt |
+| **Grid Consumption** (zone 2 — off-peak) | Panel Energia Strefa 2 | Panel Energia Strefa 2 Koszt |
+| **Return to Grid** (zone 1 — peak) | Panel Energia Produkcja Strefa 1 | Panel Energia Produkcja Strefa 1 Rekompensata |
+| **Return to Grid** (zone 2 — off-peak) | Panel Energia Produkcja Strefa 2 | Panel Energia Produkcja Strefa 2 Rekompensata |
 
 ### Step 2: Configure Cost Sensors
 
@@ -167,16 +190,18 @@ To see correctly calculated statistics **and costs** in the Energy Dashboard, yo
 
 When adding energy sources to the Energy Dashboard:
 1. Select the **Panel Energia** sensor for energy tracking
-2. In the **cost** field, select the corresponding `*_cost` sensor
-3. The cost sensor **must match** the energy sensor (e.g., `zuzycie` with `zuzycie_cost`)
+2. In the **cost** field, select the matching **Koszt** (import) or **Rekompensata** (export) sensor
+3. The cost sensor **must match** the energy sensor (e.g., `Zużycie` with `Zużycie Koszt`)
+
+> [!IMPORTANT]
+> **Do NOT use** `Zużycie Dziś`, `Produkcja Dziś`, or `Stan Licznika` sensors for the Energy Dashboard — only **Panel Energia** sensors produce correct statistics.
 
 > [!NOTE]
-> **"Entity Unavailable" (Encja niedostępna)?**
-> This is **NORMAL** for statistics sensors (`*_stats`, `*_cost`). They work in background for the Energy Dashboard and don't have a live "state" to display. **They will still work correctly.**
+> **"Entity Unavailable" (Encja niedostępna)?** This is **normal** for Panel Energia sensors. They work in background for the Energy Dashboard and don't have a live "state" to display. They will still work correctly.
 
 ---
 
-## 📅 History Import & Repair
+##  History Import & Repair
 
 Use this feature if you have missing data OR if you see incorrect spikes in your Energy Dashboard.
 
@@ -191,34 +216,23 @@ Use this feature if you have missing data OR if you see incorrect spikes in your
 
 ---
 
-## ⚠️ Limitations
+##  Limitations
 
 - **Supported Tariffs:** G11 (single-zone) and two-zone tariffs (G12, G12w, G12r) are fully supported. Three-zone tariffs (G13) are not supported — if you need G13, please [open an issue](https://github.com/ergo5/hass-energa-my-meter-api/issues).
 - **PLN Currency:** Cost calculation is in Polish złoty (PLN) only.
-- **Statistics Sensors:** Panel Energia sensors may show as "Unavailable" in entity lists (this is normal — they work in Energy Dashboard).
+- **Statistics Sensors:** Panel Energia sensors show as "unknown" or "unavailable" in entity lists (this is normal — they work in Energy Dashboard).
 - **Hourly Granularity:** Statistics are hourly — no sub-hour precision.
 
 ---
 
-## 🐛 Troubleshooting
+##  Troubleshooting
 
-### "Token expired" / Authentication Issues
+### Persistent errors in logs?
 
-If you see errors like "Token expired, attempting re-login" or frequent authentication failures:
-
-**Solution:** Reinstall and re-add the integration
-
-1. **Update to v4.2.0 or newer** (skip if already on latest):
-   - Open **HACS** → **Integrations** 
-   - Find **Energa My Meter** → Click **Update** (or **Redownload**)
-   - Restart Home Assistant
-
-2. **Remove and re-add configuration**:
-   - Go to **Settings** → **Devices & Services** → **Energa My Meter**
-   - Click the **3 dots** → **Delete**
-   - Add the integration again with your credentials
-
-**Why this helps:** Older versions (before v4.0.9) didn't save the device token properly. Step 1 gets you the fixed code, step 2 saves a persistent token that prevents authentication conflicts.
+If you see repeated **errors** (not warnings) related to Energa, try removing and re-adding the integration:
+1. Go to **Settings** → **Devices & Services** → **Energa My Meter**
+2. Click the **3 dots** → **Delete**
+3. Add the integration again with your credentials
 
 ### Sensors "Panel Energia" Missing?
 
@@ -228,12 +242,12 @@ If you see errors like "Token expired, attempting re-login" or frequent authenti
 ### Cost Not Showing in Energy Dashboard?
 
 1. **Verify prices are configured:** Settings → Energa My Meter → Configure → Set Energy Prices
-2. **Check cost sensors exist:** Look for `*_cost` sensors in entity list
-3. **Ensure correct mapping:** Cost sensor must match energy sensor (e.g., `zuzycie` with `zuzycie_cost`)
+2. **Check cost statistics exist:** Look for **Koszt** (import) or **Rekompensata** (export) statistics in Developer Tools → Statistics
+3. **Ensure correct mapping:** Cost sensor must match energy sensor (e.g., `Zużycie` with `Zużycie Koszt`)
 
 ### Data Not Appearing in Energy Dashboard?
 
-Ensure you selected the correct `(Panel Energia)` sensors, not the "Daily" or "State" sensors.
+Ensure you selected the correct **Panel Energia** sensors, not the "Daily" or "State" sensors. See [Energy Dashboard Setup](#-energy-dashboard-setup) above.
 
 ### About "Data Aktywacji" Sensor
 
