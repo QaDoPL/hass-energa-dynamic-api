@@ -57,6 +57,7 @@ class EnergaAPI:
         self._energa24_token_expires = 0
         self._energa24_account_id = None
         self._energa24_price_list_id = None
+        self._energa24_session = None  # Dedicated session for 24.energa.pl
 
     def set_hass(self, hass):
         """Set Home Assistant instance reference for database queries."""
@@ -531,7 +532,19 @@ class EnergaAPI:
         """Set the refresh token for Energa24 dynamic pricing."""
         self._energa24_refresh_token = token
 
-    async def async_refresh_energa24_token(self) -> str:
+    async def _get_energa24_session(self) -> aiohttp.ClientSession:
+        """Get or create a dedicated session for Energa24 API (separate cookies)."""
+        if self._energa24_session is None or self._energa24_session.closed:
+            self._energa24_session = aiohttp.ClientSession()
+        return self._energa24_session
+
+    async def async_close_energa24_session(self):
+        """Close the dedicated Energa24 session."""
+        if self._energa24_session and not self._energa24_session.closed:
+            await self._energa24_session.close()
+            self._energa24_session = None
+
+    async def async_refresh_energa24_token(self) -> str | None:
         """Refresh the Energa24 access token using the refresh token."""
         if not self._energa24_refresh_token:
             _LOGGER.debug("No Energa24 refresh token set")
@@ -554,7 +567,8 @@ class EnergaAPI:
         }
 
         try:
-            async with self._session.post(token_url, data=data, headers=headers) as resp:
+            e24_session = await self._get_energa24_session()
+            async with e24_session.post(token_url, data=data, headers=headers) as resp:
                 if resp.status == 200:
                     body = await resp.json()
                     self._energa24_access_token = body.get("access_token")
@@ -591,7 +605,8 @@ class EnergaAPI:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
         try:
-            async with self._session.post(cookie_url, headers=headers, json={}) as resp:
+            e24_session = await self._get_energa24_session()
+            async with e24_session.post(cookie_url, headers=headers, json={}) as resp:
                 _LOGGER.debug("Energa24 server-cookie response: %d", resp.status)
         except Exception as err:
             _LOGGER.debug("Energa24 server-cookie failed (ignoring): %s", err)
@@ -600,13 +615,13 @@ class EnergaAPI:
         url_accounts = "https://24.energa.pl/api/accounts"
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "X-Client-Type": "WEB",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
 
         try:
-            async with self._session.get(url_accounts, headers=headers) as resp:
+            async with e24_session.get(url_accounts, headers=headers) as resp:
                 if resp.status == 200:
                     accounts = await resp.json()
                     if accounts and isinstance(accounts, list) and len(accounts) > 0:
@@ -615,7 +630,8 @@ class EnergaAPI:
                     else:
                         _LOGGER.warning("No Energa24 accounts found in discovery")
                 else:
-                    _LOGGER.warning("Failed to discover Energa24 accounts (HTTP %d)", resp.status)
+                    error_text = await resp.text()
+                    _LOGGER.warning("Failed to discover Energa24 accounts (HTTP %d): %s", resp.status, error_text[:200])
         except Exception as err:
             _LOGGER.error("Error during Energa24 discovery: %s", err)
 
@@ -652,23 +668,27 @@ class EnergaAPI:
 
         headers = {
             "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
             "Authorization": f"Bearer {access_token}",
             "X-Client-Type": "WEB",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
 
         try:
-            async with self._session.get(url, headers=headers, params=params) as resp:
+            e24_session = await self._get_energa24_session()
+            async with e24_session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("dynamicOffers", [])
                 elif resp.status in (400, 401, 404, 500) and retry_discovery:
-                    _LOGGER.info("Energa24 API returned HTTP %d, retrying with discovery", resp.status)
+                    error_text = await resp.text()
+                    _LOGGER.info("Energa24 API returned HTTP %d (Body: %s), retrying with discovery", resp.status, error_text[:200])
                     self._energa24_account_id = None
                     self._energa24_price_list_id = None
                     return await self.async_get_dynamic_prices(retry_discovery=False)
                 else:
-                    _LOGGER.warning("Energa24 API returned HTTP %d", resp.status)
+                    error_text = await resp.text()
+                    _LOGGER.warning("Energa24 API returned HTTP %d (Body: %s)", resp.status, error_text[:200])
                     return None
         except Exception as err:
             _LOGGER.error("Error fetching Energa24 dynamic prices: %s", err)

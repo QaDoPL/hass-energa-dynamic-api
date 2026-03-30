@@ -184,9 +184,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        # Close dedicated session
-        if isinstance(entry_data, dict) and "session" in entry_data:
-            await entry_data["session"].close()
+        # Close dedicated sessions
+        if isinstance(entry_data, dict):
+            if "session" in entry_data:
+                await entry_data["session"].close()
+            if "api" in entry_data:
+                await entry_data["api"].async_close_energa24_session()
         # Unregister service if no more entries remain
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, "fetch_history")
