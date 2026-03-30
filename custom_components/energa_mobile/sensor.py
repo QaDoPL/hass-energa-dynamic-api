@@ -843,7 +843,6 @@ class EnergaDynamicPriceSensor(SensorEntity):
         self._attr_has_entity_name = True
         self._attr_icon = "mdi:chart-line-variant"
         self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "PLN/kWh"
         self._attr_suggested_display_precision = 4
         
@@ -859,52 +858,100 @@ class EnergaDynamicPriceSensor(SensorEntity):
             sw_version=sw_version,
         )
 
-    @property
-    def native_value(self):
-        """Return the price for current hour."""
+    def _find_current_slot(self):
+        """Find the price slot matching current time."""
         if not self._prices:
             return None
-        
-        now_hour = datetime.now().hour
-        
+
+        now = datetime.now()
+        now_date = now.strftime("%Y-%m-%d")
+        now_h = now.hour
+        now_m = now.minute
+
         for p in self._prices:
-            # Format in API: "2026-03-24T16:00:00.000+01:00"
             try:
-                p_dt = datetime.fromisoformat(p["localDate"].replace("Z", "+00:00"))
-                if p_dt.hour == now_hour and p_dt.date() == datetime.now().date():
-                    return float(p["priceValue"])
-            except (KeyError, ValueError, TypeError):
+                if p.get("date") != now_date:
+                    continue
+                hour_from = p.get("hourFrom", "")  # "09:15"
+                hour_to = p.get("hourTo", "")        # "09:30"
+                hf_parts = hour_from.split(":")
+                ht_parts = hour_to.split(":")
+                hf_h, hf_m = int(hf_parts[0]), int(hf_parts[1])
+                ht_h, ht_m = int(ht_parts[0]), int(ht_parts[1])
+
+                # Handle midnight wrap (hourTo = "00:00" means end of day)
+                if ht_h == 0 and ht_m == 0 and hf_h == 23:
+                    ht_h = 24
+
+                slot_start = hf_h * 60 + hf_m
+                slot_end = ht_h * 60 + ht_m
+                now_mins = now_h * 60 + now_m
+
+                if slot_start <= now_mins < slot_end:
+                    return p
+            except (ValueError, TypeError, IndexError):
                 continue
         return None
 
     @property
+    def native_value(self):
+        """Return the gross price for current 15-min slot."""
+        slot = self._find_current_slot()
+        if slot:
+            return float(slot.get("grossPrice", 0))
+        return None
+
+    @property
     def extra_state_attributes(self):
-        """Return attributes including 2h windows and future prices."""
+        """Return attributes including price windows and schedule."""
         attrs = {
             "last_sync": self._last_update,
-            "prices_raw": self._prices,
+            "slot_count": len(self._prices),
         }
         
         if not self._prices:
             return attrs
 
-        # Calculate best 2h windows (moving average)
-        windows_2h = []
-        for i in range(len(self._prices) - 1):
-            p1 = self._prices[i]
-            p2 = self._prices[i+1]
-            avg = (float(p1["priceValue"]) + float(p2["priceValue"])) / 2
-            windows_2h.append({
-                "start": p1["localDate"],
-                "end": p2["localDate"],
-                "avg_price": round(avg, 4)
-            })
-        
-        if windows_2h:
-            sorted_windows = sorted(windows_2h, key=lambda x: x["avg_price"])
-            attrs["cheapest_2h_window"] = sorted_windows[0]
-            attrs["most_expensive_2h_window"] = sorted_windows[-1]
-            attrs["windows_2h"] = windows_2h
+        # Current slot info
+        slot = self._find_current_slot()
+        if slot:
+            attrs["current_slot"] = f"{slot.get('hourFrom', '')} - {slot.get('hourTo', '')}"
+            attrs["current_gross_price"] = slot.get("grossPrice")
+            attrs["current_net_price"] = slot.get("netPrice")
+            attrs["offer_name"] = slot.get("offerName", "")
+
+        # Calculate cheapest/most expensive hours (group 15-min into 1h)
+        hourly = {}
+        for p in self._prices:
+            try:
+                hour_key = f"{p['date']} {p['hourFrom'][:2]}:00"
+                if hour_key not in hourly:
+                    hourly[hour_key] = {"prices": [], "date": p["date"], "hour": p["hourFrom"][:2]}
+                hourly[hour_key]["prices"].append(float(p.get("grossPrice", 0)))
+            except (KeyError, ValueError, TypeError):
+                continue
+
+        hourly_avg = []
+        for key, data in hourly.items():
+            avg = sum(data["prices"]) / len(data["prices"])
+            hourly_avg.append({"hour": key, "avg_price": round(avg, 4)})
+
+        if hourly_avg:
+            sorted_hours = sorted(hourly_avg, key=lambda x: x["avg_price"])
+            attrs["cheapest_hour"] = sorted_hours[0]
+            attrs["most_expensive_hour"] = sorted_hours[-1]
+
+        # Today's min/max gross prices
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_prices = [
+            float(p.get("grossPrice", 0))
+            for p in self._prices
+            if p.get("date") == today_str
+        ]
+        if today_prices:
+            attrs["today_min_price"] = round(min(today_prices), 4)
+            attrs["today_max_price"] = round(max(today_prices), 4)
+            attrs["today_avg_price"] = round(sum(today_prices) / len(today_prices), 4)
 
         return attrs
 
@@ -923,4 +970,5 @@ class EnergaDynamicPriceSensor(SensorEntity):
         except Exception as err:
             _LOGGER.error("Energa24: Update failed: %s", err)
             self._attr_available = False
+
 
