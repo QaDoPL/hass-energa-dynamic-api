@@ -38,6 +38,10 @@ from .const import (
     DOMAIN,
     get_price_for_key,
     CONF_ENERGA24_REFRESH_TOKEN,
+    CONF_ENERGA24_ACCOUNT_ID,
+    CONF_ENERGA24_PRICE_LIST_ID,
+    DEFAULT_ENERGA24_ACCOUNT_ID,
+    DEFAULT_ENERGA24_PRICE_LIST_ID,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,7 +62,10 @@ async def async_setup_entry(
     energa24_token = entry.options.get(CONF_ENERGA24_REFRESH_TOKEN)
     if energa24_token:
         api.set_energa24_refresh_token(energa24_token)
-        _LOGGER.debug("Energa24 refresh token configured in API")
+        account_id = entry.options.get(CONF_ENERGA24_ACCOUNT_ID, DEFAULT_ENERGA24_ACCOUNT_ID)
+        price_list_id = entry.options.get(CONF_ENERGA24_PRICE_LIST_ID, DEFAULT_ENERGA24_PRICE_LIST_ID)
+        api.set_energa24_ids(account_id, price_list_id)
+        _LOGGER.info("Energa24 configured: account=%s, price_list=%s", account_id, price_list_id)
 
     # Get integration version for device info
     integration = await async_get_integration(hass, DOMAIN)

@@ -589,76 +589,20 @@ class EnergaAPI:
             return None
         return None
 
-    async def async_discover_energa24_ids(self) -> bool:
-        """Discover account_id and price_list_id (PPE) for Energa24."""
-        access_token = await self.async_refresh_energa24_token()
-        if not access_token:
-            return False
+    def set_energa24_ids(self, account_id: str, price_list_id: str):
+        """Set Energa24 account and price list IDs from config."""
+        self._energa24_account_id = account_id
+        self._energa24_price_list_id = price_list_id
 
-        _LOGGER.debug("Discovering Energa24 account and PPE")
-
-        # 0. Set server cookies (important for some API endpoints)
-        cookie_url = "https://24.energa.pl/ss/api/server-cookie"
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "X-Client-Type": "WEB",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        }
-        try:
-            e24_session = await self._get_energa24_session()
-            async with e24_session.post(cookie_url, headers=headers, json={}) as resp:
-                _LOGGER.debug("Energa24 server-cookie response: %d", resp.status)
-        except Exception as err:
-            _LOGGER.debug("Energa24 server-cookie failed (ignoring): %s", err)
-        
-        # 1. Discover Account ID
-        url_accounts = "https://24.energa.pl/api/accounts"
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json, text/plain, */*",
-            "X-Client-Type": "WEB",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        }
-
-        try:
-            async with e24_session.get(url_accounts, headers=headers) as resp:
-                if resp.status == 200:
-                    accounts = await resp.json()
-                    if accounts and isinstance(accounts, list) and len(accounts) > 0:
-                        self._energa24_account_id = str(accounts[0].get("id"))
-                        _LOGGER.info("Discovered Energa24 account_id: %s", self._energa24_account_id)
-                    else:
-                        _LOGGER.warning("No Energa24 accounts found in discovery")
-                else:
-                    error_text = await resp.text()
-                    _LOGGER.warning("Failed to discover Energa24 accounts (HTTP %d): %s", resp.status, error_text[:200])
-        except Exception as err:
-            _LOGGER.error("Error during Energa24 discovery: %s", err)
-
-        # 2. Use PPE from meter data as price_list_id
-        if not self._meters_data:
-            _LOGGER.debug("No meter data for PPE discovery, fetching...")
-            await self.async_get_data()
-
-        if self._meters_data:
-            # We take the PPE from the first meter
-            self._energa24_price_list_id = self._meters_data[0].get("meter_point_id")
-            _LOGGER.info("Using PPE from My Meter data as Energa24 price_list_id: %s", self._energa24_price_list_id)
-
-        return bool(self._energa24_account_id and self._energa24_price_list_id)
-
-    async def async_get_dynamic_prices(self, retry_discovery: bool = True) -> list | None:
-        """Fetch dynamic prices from Energa24 with automatic discovery."""
+    async def async_get_dynamic_prices(self) -> list | None:
+        """Fetch dynamic prices from Energa24 using configured IDs."""
         access_token = await self.async_refresh_energa24_token()
         if not access_token:
             return None
 
         if not self._energa24_account_id or not self._energa24_price_list_id:
-            if not await self.async_discover_energa24_ids():
-                _LOGGER.warning("Could not discover Energa24 IDs, using fallbacks")
-                # Fallbacks only if discovery fails
-                self._energa24_account_id = self._energa24_account_id or "4204825385"
-                self._energa24_price_list_id = self._energa24_price_list_id or "590243835015020670"
+            _LOGGER.error("Energa24 account_id or price_list_id not configured")
+            return None
 
         today = datetime.now().strftime("%Y-%m-%d")
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -679,16 +623,16 @@ class EnergaAPI:
             async with e24_session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return data.get("dynamicOffers", [])
-                elif resp.status in (400, 401, 404, 500) and retry_discovery:
-                    error_text = await resp.text()
-                    _LOGGER.info("Energa24 API returned HTTP %d (Body: %s), retrying with discovery", resp.status, error_text[:200])
-                    self._energa24_account_id = None
-                    self._energa24_price_list_id = None
-                    return await self.async_get_dynamic_prices(retry_discovery=False)
+                    offers = data.get("dynamicOffers", [])
+                    _LOGGER.info("Energa24: fetched %d price slots", len(offers))
+                    return offers
                 else:
                     error_text = await resp.text()
-                    _LOGGER.warning("Energa24 API returned HTTP %d (Body: %s)", resp.status, error_text[:200])
+                    _LOGGER.warning(
+                        "Energa24 API returned HTTP %d: %s",
+                        resp.status,
+                        error_text[:200],
+                    )
                     return None
         except Exception as err:
             _LOGGER.error("Error fetching Energa24 dynamic prices: %s", err)

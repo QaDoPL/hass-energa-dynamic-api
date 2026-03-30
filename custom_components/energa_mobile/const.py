@@ -11,6 +11,10 @@ CONF_IMPORT_PRICE_2 = "import_price_2"  # PLN/kWh zone 2 / off-peak (G12w)
 
 # Energa24 Dynamic Pricing
 CONF_ENERGA24_REFRESH_TOKEN = "energa24_refresh_token"
+CONF_ENERGA24_ACCOUNT_ID = "energa24_account_id"
+CONF_ENERGA24_PRICE_LIST_ID = "energa24_price_list_id"
+DEFAULT_ENERGA24_ACCOUNT_ID = "4204825385"
+DEFAULT_ENERGA24_PRICE_LIST_ID = "590243835015020670"
 
 # Default prices (PLN/kWh) - G12w tariff from 2026-01-01
 DEFAULT_IMPORT_PRICE = 1.188

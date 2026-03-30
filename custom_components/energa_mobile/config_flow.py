@@ -19,12 +19,16 @@ from .const import (
     CONF_IMPORT_PRICE_1,
     CONF_IMPORT_PRICE_2,
     CONF_ENERGA24_REFRESH_TOKEN,
+    CONF_ENERGA24_ACCOUNT_ID,
+    CONF_ENERGA24_PRICE_LIST_ID,
     CONF_PASSWORD,
     CONF_USERNAME,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
+    DEFAULT_ENERGA24_ACCOUNT_ID,
+    DEFAULT_ENERGA24_PRICE_LIST_ID,
     DOMAIN,
 )
 
@@ -289,6 +293,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=new_options)
 
         current_token = self._config_entry.options.get(CONF_ENERGA24_REFRESH_TOKEN, "")
+        current_account = self._config_entry.options.get(CONF_ENERGA24_ACCOUNT_ID, DEFAULT_ENERGA24_ACCOUNT_ID)
+        current_price_list = self._config_entry.options.get(CONF_ENERGA24_PRICE_LIST_ID, DEFAULT_ENERGA24_PRICE_LIST_ID)
 
         return self.async_show_form(
             step_id="energa24",
@@ -296,6 +302,12 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(
                         CONF_ENERGA24_REFRESH_TOKEN, default=current_token
+                    ): str,
+                    vol.Optional(
+                        CONF_ENERGA24_ACCOUNT_ID, default=current_account
+                    ): str,
+                    vol.Optional(
+                        CONF_ENERGA24_PRICE_LIST_ID, default=current_price_list
                     ): str,
                 }
             ),
