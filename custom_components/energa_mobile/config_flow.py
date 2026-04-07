@@ -14,17 +14,20 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EnergaAPI, EnergaAuthError, EnergaConnectionError
 from .const import (
+    CONF_BALANCE_BASELINE_EXPORT,
+    CONF_BALANCE_BASELINE_IMPORT,
     CONF_DEVICE_TOKEN,
+    CONF_ENERGA24_REFRESH_TOKEN,
+    CONF_ENERGA24_ACCOUNT_ID,
+    CONF_ENERGA24_PRICE_LIST_ID,
     CONF_EXPORT_PRICE,
     CONF_IMPORT_PRICE,
     CONF_IMPORT_PRICE_1,
     CONF_IMPORT_PRICE_2,
-    CONF_ENERGA24_REFRESH_TOKEN,
-    CONF_ENERGA24_ACCOUNT_ID,
-    CONF_ENERGA24_PRICE_LIST_ID,
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
+    DEFAULT_BALANCE_BASELINE,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
@@ -256,6 +259,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         # Get current values from options
         current_export = self._config_entry.options.get(CONF_EXPORT_PRICE, DEFAULT_EXPORT_PRICE)
         current_coeff = self._config_entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
+        current_bl_import = self._config_entry.options.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE)
+        current_bl_export = self._config_entry.options.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE)
 
         if has_zones:
             # G12w: show zone-specific prices
@@ -278,6 +283,12 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Required(
                             CONF_PROSUMER_COEFFICIENT, default=current_coeff
                         ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BALANCE_BASELINE_IMPORT, default=current_bl_import
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BALANCE_BASELINE_EXPORT, default=current_bl_export
+                        ): vol.Coerce(float),
                     }
                 ),
             )
@@ -297,6 +308,12 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         ): vol.Coerce(float),
                         vol.Required(
                             CONF_PROSUMER_COEFFICIENT, default=current_coeff
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BALANCE_BASELINE_IMPORT, default=current_bl_import
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BALANCE_BASELINE_EXPORT, default=current_bl_export
                         ): vol.Coerce(float),
                     }
                 ),
@@ -435,12 +452,30 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             if statistic_ids:
                 cost_statistic_ids = [f"{sid}_cost" for sid in statistic_ids]
                 all_statistic_ids = statistic_ids + cost_statistic_ids
-                rec.async_clear_statistics(all_statistic_ids)
-                _LOGGER.info(
-                    "Cleared Energy Panel statistics for %d Energa sensors: %s",
-                    len(statistic_ids),
-                    all_statistic_ids,
-                )
+
+                # HA 2026.4+ removed async_clear_statistics from Recorder
+                if hasattr(rec, "async_clear_statistics"):
+                    rec.async_clear_statistics(all_statistic_ids)
+                    _LOGGER.info(
+                        "Cleared Energy Panel statistics for %d Energa sensors: %s",
+                        len(statistic_ids),
+                        all_statistic_ids,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "async_clear_statistics not available (HA 2026.4+). "
+                        "Use Developer Tools → Statistics to clear manually: %s",
+                        all_statistic_ids,
+                    )
+                    from homeassistant.components import persistent_notification
+                    persistent_notification.async_create(
+                        self.hass,
+                        "Funkcja czyszczenia statystyk nie jest dostępna w tej wersji Home Assistant.\n\n"
+                        "Użyj **Narzędzia deweloperskie → Statystyki** aby ręcznie wyczyścić:\n"
+                        + "\n".join(f"- `{sid}`" for sid in all_statistic_ids),
+                        title="Energa: Czyszczenie niedostępne",
+                        notification_id="energa_clear_stats_unavailable",
+                    )
             else:
                 _LOGGER.warning("No Energa Panel Energia sensors found to clear")
 

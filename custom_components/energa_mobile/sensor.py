@@ -25,6 +25,7 @@ from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -35,7 +36,10 @@ from homeassistant.loader import async_get_integration
 
 from .api import EnergaAuthError, EnergaConnectionError, EnergaTokenExpiredError
 from .const import (
+    CONF_BALANCE_BASELINE_EXPORT,
+    CONF_BALANCE_BASELINE_IMPORT,
     CONF_PROSUMER_COEFFICIENT,
+    DEFAULT_BALANCE_BASELINE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
     get_price_for_key,
@@ -202,6 +206,17 @@ async def async_setup_entry(
                     entry=entry,
                 )
             )
+            sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="import_1",
+                    name="Panel Energia Strefa 1 Koszt",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
+                )
+            )
 
             # Strefa 2 (tania)
             sensors.append(
@@ -214,6 +229,17 @@ async def async_setup_entry(
                     entry=entry,
                 )
             )
+            sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="import_2",
+                    name="Panel Energia Strefa 2 Koszt",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
+                )
+            )
         else:
             # Single-zone tariff: one statistics sensor
             sensors.append(
@@ -224,6 +250,17 @@ async def async_setup_entry(
                     name="Panel Energia Zużycie",
                     device_info=device_info,
                     entry=entry,
+                )
+            )
+            sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="import",
+                    name="Panel Energia Zużycie Koszt",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
                 )
             )
 
@@ -241,6 +278,17 @@ async def async_setup_entry(
                 )
             )
             sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="export_1",
+                    name="Panel Energia Produkcja Strefa 1 Rekompensata",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
+                )
+            )
+            sensors.append(
                 EnergaStatisticsSensor(
                     coordinator=coordinator,
                     meter_id=meter_id,
@@ -248,6 +296,17 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja Strefa 2",
                     device_info=device_info,
                     entry=entry,
+                )
+            )
+            sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="export_2",
+                    name="Panel Energia Produkcja Strefa 2 Rekompensata",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
                 )
             )
         elif meter.get("obis_minus"):
@@ -261,6 +320,17 @@ async def async_setup_entry(
                     entry=entry,
                 )
             )
+            sensors.append(
+                EnergaCostStatisticsSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="export",
+                    name="Panel Energia Produkcja Rekompensata",
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
+                )
+            )
 
         # === PROSUMER BALANCE SENSOR ===
         # (only for prosumers — meters with export capability)
@@ -272,6 +342,37 @@ async def async_setup_entry(
                     device_info=device_info,
                     entry=entry,
                     has_zones=has_zones,
+                )
+            )
+
+        # === PRICE SENSORS (F1: v4.14) ===
+
+        if has_zones:
+            price_keys = [
+                ("import_1", "Cena Poboru Strefa 1", "mdi:cash-multiple"),
+                ("import_2", "Cena Poboru Strefa 2", "mdi:cash-multiple"),
+            ]
+        else:
+            price_keys = [
+                ("import", "Cena Poboru", "mdi:cash-multiple"),
+            ]
+
+        if meter.get("obis_minus"):
+            price_keys.append(("export", "Cena Oddania", "mdi:cash-refund"))
+            price_keys.append(
+                ("coefficient", "Współczynnik Prosumencki", "mdi:percent")
+            )
+
+        for p_key, p_name, p_icon in price_keys:
+            sensors.append(
+                EnergaPriceSensor(
+                    data_key=p_key,
+                    name=p_name,
+                    icon=p_icon,
+                    device_info=device_info,
+                    entry=entry,
+                    serial=serial,
+                    meter_id=meter_id,
                 )
             )
 
@@ -298,7 +399,7 @@ async def async_setup_entry(
                         device_class=device_class,
                     )
                 )
-                
+
     # 5. Energa24 Dynamic Pricing Sensor
     if energa24_token:
         _LOGGER.info("Energa: Creating Dynamic Price sensor")
@@ -627,13 +728,14 @@ class EnergaLiveSensor(CoordinatorEntity, SensorEntity):
 
 
 class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
-    """Prosumer balance sensor: export × coefficient − import.
+    """Prosumer balance sensor: (export − baseline_export) × coeff − (import − baseline_import).
 
-    Uses imported statistics sums (cumulative since history import date)
-    rather than lifetime meter totals. This ensures the balance counts
-    from the activation/history-import date, not from meter installation.
+    Uses real-time meter totals from the API minus user-configured baselines.
+    Baselines represent meter readings at the start of the tracking period
+    (e.g. the values from a prosumer bill on Feb 1).
 
-    Positive = consuming own surplus. Negative = paying for grid power.
+    With baselines set to 0 (default), counts from meter installation (lifetime).
+    Positive = surplus available. Negative = consumed more than produced.
     """
 
     def __init__(
@@ -642,14 +744,13 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         meter_id: str,
         device_info: DeviceInfo,
         entry: ConfigEntry,
-        has_zones: bool = False,
+        **kwargs,
     ) -> None:
         """Initialize prosumer balance sensor."""
         super().__init__(coordinator)
 
         self._meter_id = meter_id
         self._entry = entry
-        self._has_zones = has_zones
 
         # Entity attributes
         self._attr_name = "Bilans Prosumencki"
@@ -668,108 +769,77 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         # Icon
         self._attr_icon = "mdi:scale-balance"
 
-    def _get_stats_sums(self) -> tuple[float, float] | None:
-        """Get import and export sums from pre-fetched statistics.
-
-        Returns (import_sum, export_sum) or None if stats not available.
-        """
-        from homeassistant.helpers import entity_registry as er
-
-        registry = er.async_get(self.hass)
-        pre_fetched = self.coordinator.get_pre_fetched_stats()
-
-        if not pre_fetched:
-            return None
-
-        # Resolve entity_ids from unique_ids
-        def _find_entity_id(suffix: str) -> str | None:
-            unique_id = f"energa_{self._meter_id}_{suffix}_stats"
-            for entity in registry.entities.values():
-                if entity.unique_id == unique_id and entity.platform == DOMAIN:
-                    return entity.entity_id
-            return None
-
-        # Sum import stats
-        import_sum = 0.0
-        if self._has_zones:
-            for suffix in ["import_1", "import_2"]:
-                eid = _find_entity_id(suffix)
-                if eid and eid in pre_fetched:
-                    import_sum += pre_fetched[eid].get("sum", 0) or 0
-        else:
-            eid = _find_entity_id("import")
-            if eid and eid in pre_fetched:
-                import_sum = pre_fetched[eid].get("sum", 0) or 0
-
-        # Get export sum
-        export_sum = 0.0
-        if self._has_zones:
-            for suffix in ["export_1", "export_2"]:
-                eid = _find_entity_id(suffix)
-                if eid and eid in pre_fetched:
-                    export_sum += pre_fetched[eid].get("sum", 0) or 0
-        else:
-            eid = _find_entity_id("export")
-            if eid and eid in pre_fetched:
-                export_sum = pre_fetched[eid].get("sum", 0) or 0
-
-        if import_sum == 0 and export_sum == 0:
-            return None  # No stats available yet
-
-        return (import_sum, export_sum)
-
     @property
     def native_value(self):
-        """Return prosumer balance: export × coefficient − import."""
-        sums = self._get_stats_sums()
-        if sums is None:
-            # Fallback to meter totals if no stats imported yet
-            totals = self.coordinator._meter_totals.get(str(self._meter_id))
-            if not totals:
-                return None
-            total_import = totals.get("import", 0)
-            total_export = totals.get("export", 0)
-        else:
-            total_import, total_export = sums
+        """Return prosumer balance: (export − baseline) × coeff − (import − baseline)."""
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return None
+
+        current_import = totals.get("import", 0)
+        current_export = totals.get("export", 0)
 
         coefficient = float(
             self._entry.options.get(
                 CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
             )
         )
+        baseline_import = float(
+            self._entry.options.get(
+                CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE
+            )
+        )
+        baseline_export = float(
+            self._entry.options.get(
+                CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE
+            )
+        )
 
-        balance = (total_export * coefficient) - total_import
+        net_export = current_export - baseline_export
+        net_import = current_import - baseline_import
+
+        balance = (net_export * coefficient) - net_import
         return round(balance, 2)
 
     @property
     def extra_state_attributes(self):
         """Return extra attributes with breakdown."""
-        sums = self._get_stats_sums()
-        source = "statistics"
-        if sums is None:
-            totals = self.coordinator._meter_totals.get(str(self._meter_id))
-            if not totals:
-                return {}
-            total_import = totals.get("import", 0)
-            total_export = totals.get("export", 0)
-            source = "meter_totals"
-        else:
-            total_import, total_export = sums
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return {}
+
+        current_import = totals.get("import", 0)
+        current_export = totals.get("export", 0)
 
         coefficient = float(
             self._entry.options.get(
                 CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
             )
         )
+        baseline_import = float(
+            self._entry.options.get(
+                CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE
+            )
+        )
+        baseline_export = float(
+            self._entry.options.get(
+                CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE
+            )
+        )
+
+        net_export = current_export - baseline_export
+        net_import = current_import - baseline_import
 
         return {
-            "total_import_kwh": round(total_import, 2),
-            "total_export_kwh": round(total_export, 2),
+            "meter_import_kwh": round(current_import, 2),
+            "meter_export_kwh": round(current_export, 2),
+            "baseline_import_kwh": baseline_import,
+            "baseline_export_kwh": baseline_export,
+            "net_import_kwh": round(net_import, 2),
+            "net_export_kwh": round(net_export, 2),
             "coefficient": coefficient,
-            "effective_export_kwh": round(total_export * coefficient, 2),
-            "data_source": source,
+            "effective_export_kwh": round(net_export * coefficient, 2),
         }
-
 
     @property
     def available(self) -> bool:
@@ -1003,6 +1073,123 @@ class EnergaInfoSensor(CoordinatorEntity, SensorEntity):
             if str(meter.get("meter_point_id")) == str(self._meter_id):
                 return meter.get(self._data_key)
         return None
+
+
+class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
+    """Pure placeholder entity for cost statistics.
+
+    Required so that HA's state machine recognizes the statistic_id
+    used by async_import_statistics in EnergaStatisticsSensor.
+    This sensor does NOT import statistics itself — all cost import
+    logic lives in EnergaStatisticsSensor._handle_coordinator_update.
+    """
+
+    def __init__(
+        self,
+        coordinator: EnergaCoordinator,
+        meter_id: str,
+        data_key: str,
+        name: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        serial: str = "",
+    ) -> None:
+        """Initialize cost statistics placeholder sensor."""
+        super().__init__(coordinator)
+
+        self._meter_id = meter_id
+        self._data_key = data_key
+        self._entry = entry
+
+        # Entity attributes
+        self._attr_name = name
+        self._attr_unique_id = f"energa_{serial}_{data_key}_cost_stats"
+        self._attr_has_entity_name = True
+
+        # Force entity_id to match statistic_id used by EnergaStatisticsSensor
+        suffix_to_name = {
+            "import": "panel_energia_zuzycie",
+            "import_1": "panel_energia_strefa_1",
+            "import_2": "panel_energia_strefa_2",
+            "export": "panel_energia_produkcja",
+            "export_1": "panel_energia_produkcja_strefa_1",
+            "export_2": "panel_energia_produkcja_strefa_2",
+        }
+        energy_slug = suffix_to_name.get(data_key, f"panel_{data_key}")
+        self.entity_id = f"sensor.energa_{serial}_{energy_slug}_cost"
+
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_native_unit_of_measurement = "PLN"
+
+        # Device info
+        self._attr_device_info = device_info
+
+        # Icon
+        self._attr_icon = (
+            "mdi:currency-usd" if "import" in data_key else "mdi:piggy-bank"
+        )
+
+    @property
+    def native_value(self):
+        """Return None — cost data flows via async_import_statistics."""
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Cost placeholder is available when coordinator has data."""
+        return self.coordinator.data is not None
+
+
+class EnergaPriceSensor(SensorEntity):
+    """Diagnostic sensor exposing configured energy price as HA entity.
+
+    Enables Energy Dashboard "Use entity with current price" mode.
+    Not tied to coordinator — value comes from config options.
+    """
+
+    def __init__(
+        self,
+        data_key: str,
+        name: str,
+        icon: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        serial: str,
+        meter_id: str,
+    ) -> None:
+        """Initialize price sensor."""
+        self._data_key = data_key
+        self._entry = entry
+        self._serial = serial
+        self._meter_id = meter_id
+
+        self._attr_name = name
+        self._attr_unique_id = f"energa_{serial}_{data_key}_price"
+        self._attr_has_entity_name = True
+        self._attr_icon = icon
+        self._attr_device_info = device_info
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+        if data_key == "coefficient":
+            self._attr_native_unit_of_measurement = None
+            self._attr_state_class = None
+        else:
+            self._attr_native_unit_of_measurement = "PLN/kWh"
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        """Return price from config options."""
+        opts = dict(self._entry.options)
+
+        if self._data_key == "coefficient":
+            return float(
+                opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
+            )
+
+        return get_price_for_key(
+            opts, self._data_key, meter_id=self._meter_id
+        )
 
 class EnergaDynamicPriceSensor(SensorEntity):
     """Sensor showing current dynamic price from Energa24."""
