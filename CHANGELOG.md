@@ -1,6 +1,3 @@
-
-Dynamic Prices v1
-
 # Changelog
 
 ## v4.4.1 (2026-02-21) - G12w Bugfixes & Code Cleanup

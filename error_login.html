@@ -1,0 +1,779 @@
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+            "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html lang="pl" xmlns="http://www.w3.org/1999/xhtml" class="login-pf">
+
+    <head>
+    <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="a8fd2e80-c426-4f01-b532-19d7e38b4a48" type="text/javascript" async defer></script>
+    <script>
+        // ========================================
+        // COOKIEBOT CONFIGURATION & CONSTANTS
+        // ========================================
+        const COOKIEBOT_CONFIG = {
+            DEBOUNCE_DELAY: 100, // Debounce delay for observers
+            COOKIE_NAME: 'CookieConsent',
+            DIALOG_ID: 'CybotCookiebotDialog',
+            BLUR_CLASS: 'body-blur',
+            CUSTOM_CONTENT_DIALOG_SELECTOR: "div[aria-labelledby='CybotCookiebotDialogNavAbout']",
+        };
+
+        // ========================================
+        // UTILITY FUNCTIONS
+        // ========================================
+        
+        /**
+            * Gets cookie value by name
+            * @param {string} name - cookie name
+            * @returns {string|null} cookie value or null
+        */
+        const getCookie = (name) => {
+            if (typeof window !== "undefined") {
+                const value = '; ' + (document && document['cookie'] ? document['cookie'] : '');
+                const parts = value.split('; ' + name + '=');
+                if (parts.length === 2) {
+                    return parts.pop().split(";").shift();
+                }
+            }
+            return null;
+        };
+
+        /**
+             * Parses CookieConsent data and returns formatted information
+             * @returns {Object} {id: string|null, datetime: string|null}
+        */
+        function parseCookiebotData() {
+            const defaultResult = { id: null, datetime: null };
+            
+            try {
+                const encodedData = getCookie(COOKIEBOT_CONFIG.COOKIE_NAME);
+
+                if (!encodedData) {
+                    return defaultResult;
+                }
+
+                // Decode and parse cookie data
+                const decodedData = decodeURIComponent(encodedData);
+
+                // Cookiebot stores data in format: {stamp:'value',utc:'value',...}
+                // We need to convert it to proper JSON format
+                let jsonString = decodedData;
+                // If it starts and ends with curly braces, remove them first
+                if (jsonString.startsWith('{') && jsonString.endsWith('}')) {
+                    jsonString = jsonString.slice(1, -1);
+                }
+                // Replace single quotes with double quotes for JSON compatibility
+                jsonString = jsonString.replace(/'/g, '"');
+                // Add quotes around unquoted keys (word characters followed by colon)
+                jsonString = jsonString.replace(/([a-zA-Z_][a-zA-Z0-9_]*):/g, '"$1":');
+                // Wrap back in curly braces
+                jsonString = '{' + jsonString + '}';
+
+                const props = JSON.parse(jsonString);
+
+                // Format date to Polish timezone
+                if (props && props.utc) {
+                    const date = new Date(props.utc);
+                    const formattedDatetime = date.toLocaleString('pl-PL', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZone: 'Europe/Warsaw'
+                    });
+                    defaultResult.datetime = formattedDatetime;
+                }
+
+                if (props && props.stamp) {
+                    defaultResult.id = props.stamp;
+                }
+
+            return defaultResult;
+            } catch (error) {
+                console.error("Error parsing Cookiebot data:", error);
+                return defaultResult;
+            }
+        }
+
+        // ========================================
+        // COOKIE SETTINGS EVENT HANDLER
+        // ========================================
+            
+        /**
+            * Handles clicks on cookie settings links
+        */
+        function handleCookieSettingsClick(event) {
+            const linkElement = event.target.closest('a');
+            
+            if (linkElement && linkElement.href && linkElement.href.includes('#cookie-settings')) {
+                event.preventDefault();
+                
+                if (typeof Cookiebot !== 'undefined') {
+                    Cookiebot.renew();
+                    
+                    // Remove hash from URL
+                    if (window.location.hash === '#cookie-settings') {
+                        window.history.replaceState(null, null, window.location.pathname + window.location.search);
+                    }
+                }
+            }
+        }
+
+        // ========================================
+        // DIALOG BLUR MANAGER
+        // ========================================
+        
+        /**
+            * Manages body blur effect during Cookiebot dialog display
+            */
+        class CookiebotDialogManager {
+            constructor() {
+                this.dialogObserver = null;
+                this.bodyObserver = null;
+                this.isDialogOpen = false;
+                this.init();
+            }
+
+            init() {
+                this.setupBodyObserver();
+                this.checkInitialState();
+            }
+
+            /**
+            * Checks if dialog is visible
+            */
+            isDialogVisible() {
+                const dialog = document.getElementById(COOKIEBOT_CONFIG.DIALOG_ID);
+                return dialog && 
+                        dialog.style.display !== 'none' && 
+                        dialog.style.opacity !== '0';
+            }
+
+            /**
+            * Toggles blur effect and manages observers
+            */
+            toggleBlurEffect() {
+                const isVisible = this.isDialogVisible();
+                
+                // Skip if dialog state hasn't changed
+                if (isVisible === this.isDialogOpen) {
+                    return;
+                }
+                
+                this.isDialogOpen = isVisible;
+                
+                if (isVisible) {
+                    this.handleDialogOpen();
+                } else {
+                    this.handleDialogClose();
+                }
+            }
+
+            /**
+            * Handles dialog opening
+            */
+            handleDialogOpen() {
+                document.body.classList.add(COOKIEBOT_CONFIG.BLUR_CLASS);
+                this.setupDialogObserver();
+                this.addCustomContent();
+            }
+
+            /**
+            * Handles dialog closing
+            */
+            handleDialogClose() {
+                document.body.classList.remove(COOKIEBOT_CONFIG.BLUR_CLASS);
+                this.cleanupDialogObserver();
+            }
+
+            /**
+            * Sets up dialog observer
+            */
+            setupDialogObserver() {
+                if (this.dialogObserver) {
+                    return;
+                }
+                
+                const dialog = document.getElementById(COOKIEBOT_CONFIG.DIALOG_ID);
+                if (!dialog) {
+                    return;
+                }
+
+                this.dialogObserver = new MutationObserver(() => {
+                    clearTimeout(this.dialogObserver.timeoutId);
+                    this.dialogObserver.timeoutId = setTimeout(() => {
+                    this.toggleBlurEffect();
+                    }, COOKIEBOT_CONFIG.DEBOUNCE_DELAY);
+                });
+                
+                this.dialogObserver.observe(dialog, { attributes: true });
+            }
+
+            /**
+            * Sets up body observer
+            */
+            setupBodyObserver() {
+                this.bodyObserver = new MutationObserver(() => {
+                    clearTimeout(this.bodyObserver.timeoutId);
+                    this.bodyObserver.timeoutId = setTimeout(() => {
+                    this.toggleBlurEffect();
+                    }, COOKIEBOT_CONFIG.DEBOUNCE_DELAY);
+                });
+                
+                this.bodyObserver.observe(document.body, { childList: true, subtree: false });
+            }
+
+            /**
+            * Adds custom content to dialog
+            */
+            addCustomContent() {
+                const dialogDiv = document.querySelector(COOKIEBOT_CONFIG.CUSTOM_CONTENT_DIALOG_SELECTOR);
+                
+                if (!dialogDiv) {
+                    return;
+                }
+
+                const cookiebotData = parseCookiebotData();
+
+                // Add consent ID
+                if (cookiebotData && cookiebotData.id && !dialogDiv.querySelector('#cookiebot-custom-content-id')) {
+                    const idDiv = document.createElement('div');
+                    idDiv.id = 'cookiebot-custom-content-id';
+                    idDiv.style.marginTop = '0.5em';
+                    idDiv.style.wordWrap = 'break-word';
+                    idDiv.innerHTML = "<span class='font-bold'>ID zgody: </span>" + cookiebotData.id;
+                    dialogDiv.appendChild(idDiv);
+                }
+
+                // Add consent date
+                if (cookiebotData && cookiebotData.datetime && !dialogDiv.querySelector('#cookiebot-custom-content-datetime')) {
+                    const datetimeDiv = document.createElement('div');
+                    datetimeDiv.id = 'cookiebot-custom-content-datetime';
+                    datetimeDiv.innerHTML = "<span class='font-bold'>Data Twojej decyzji o cookies: </span>" + cookiebotData.datetime;
+                    dialogDiv.appendChild(datetimeDiv);
+                }
+            }
+
+            /**
+            * Cleans up dialog observer
+            */
+            cleanupDialogObserver() {
+                if (this.dialogObserver) {
+                    this.dialogObserver.disconnect();
+                    this.dialogObserver = null;
+                }
+            }
+
+            /**
+            * Checks initial dialog state
+            */
+            checkInitialState() {
+                this.toggleBlurEffect();
+            }
+        }
+
+        // ========================================
+        // INITIALIZATION
+        // ========================================
+
+        // Add event listener for cookie settings
+        document.addEventListener('click', handleCookieSettingsClick);
+
+        // Initialize dialog management after DOM loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new CookiebotDialogManager();
+        });    
+    </script>
+    
+        <!-- Google Tag Manager -->
+        <script>(function (w, d, s, l, i) {
+                w[l] = w[l] || [];
+                w[l].push({
+                    'gtm.start':
+                        new Date().getTime(), event: 'gtm.js'
+                });
+                var f = d.getElementsByTagName(s)[0],
+                    j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : '';
+                j.async = true;
+                j.src =
+                    'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+                f.parentNode.insertBefore(j, f);
+            })(window, document, 'script', 'dataLayer', 'GTM-N87WN5F');</script>
+        <!-- End Google Tag Manager -->
+        <meta charset="utf-8">
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+        <meta name="robots" content="noindex, nofollow">
+
+                <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>Energa24</title>
+        <link rel="icon" href="/auth/resources/3i3uy/login/energa-login/img/favicon.ico"/>
+        <link rel="preconnect" href="https://fonts.gstatic.com"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/tiny-slider.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/base.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/login.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/chat-genesys.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/cookiebot.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/footer.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/accessibility-panel.css?v=237474" rel="stylesheet"/>
+                    <link href="/auth/resources/3i3uy/login/energa-login/css/accessibility.css?v=237474" rel="stylesheet"/>
+                    <script src="/auth/resources/3i3uy/login/energa-login/js/locale.js?v=237474" type="text/javascript"></script>
+                    <script src="/auth/resources/3i3uy/login/energa-login/js/tiny-slider.js?v=237474" type="text/javascript"></script>
+                    <script src="/auth/resources/3i3uy/login/energa-login/js/index.js?v=237474" type="text/javascript"></script>
+    <SCRIPT> if (typeof history.replaceState === 'function') {  history.replaceState({}, "some title", "https://24.energa.pl/auth/realms/Energa-Selfcare/login-actions/authenticate?execution=c982359a-fb85-4ab8-9ed0-71956c1cb7e9&client_id=energa-selfcare&tab_id=0lInrIh6nyM&client_data=eyJydSI6Imh0dHBzOi8vMjQuZW5lcmdhLnBsL2FwaS9hdXRoL2NhbGxiYWNrL2tleWNsb2FrIiwicnQiOiJjb2RlIn0"); }</SCRIPT></head>
+
+    <body class="" data-cms-url="https://24.energa.pl/energapl" data-api-url="https://24.energa.pl/api/" style="opacity: 0">
+    <!-- Google Tag Manager (noscript) -->
+    <noscript>
+        <iframe src="https://www.googletagmanager.com/ns.html?id=GTM-N87WN5F"
+                height="0" width="0" style="display:none;visibility:hidden"></iframe>
+    </noscript>
+    <!-- End Google Tag Manager (noscript) -->
+    <main>
+        <div class="page-container">
+        <header class="header page-container__header">
+            <h1 class="header__title">
+                <a class="title__link" href="https://24.energa.pl/ss">
+                    <svg aria-hidden class="link__icon mobile" width="42" height="40" fill="none"
+                         xmlns="http://www.w3.org/2000/svg">
+                        <path fill-rule="evenodd" clip-rule="evenodd"
+                              d="M1.31 20.89c1.124 7.484 8.3 10.202 14.693 9.52 7.58-.817 15.604-5.685 19.43-12.393 1.41-2.47 2.184-6.294 1.347-9.705v.021C38.17 17.511 26.9 27.6 16.788 28.002c-9.255.372-11.852-3.628-11.852-8 .307.124.626.248.965.351 11.385 3.556 23.798-5.22 25.79-12.61 1.41-5.229-1.663-7.534-6.465-7.73-4.855-.186-11.714 1.592-16.93 7.73-1.144 1.376.318 2.668 1.4 1.324 4.473-5.22 9.413-6.005 12.127-5.943 2.321.114 3.222 2.46 1.05 5.405-2.662 3.607-12.976 7.246-16.951 4.083-3.636-2.894-.127-7.855 3-10.687.965-.878.445-1.25-.52-.62C-.725 7.34-1.763 14.44 2.17 18.235a24.61 24.61 0 0 0-.858 2.656ZM37.226 8.086c-.01-.01-.02-.01-.032-.02 1.336 4.123.255 7.586-1.06 10.232C32.53 25.52 23.7 31.04 15.717 31.98 9.24 32.746 1.894 30.875.802 23.516c-.997 7.483 1.834 16.227 14.077 16.227 10.877 0 21.042-6.842 25.431-15.318.286.372.71 1.251.912 2.398.032.207.35.176.381-.03.583-3.432 1.347-12.61-4.378-18.708Z"
+                              fill="#E30613"></path>
+                    </svg>
+                    <svg aria-hidden class="link__icon desktop" width="240" height="40" fill="none"
+                         xmlns="http://www.w3.org/2000/svg">
+                        <path fill-rule="evenodd" clip-rule="evenodd"
+                              d="M164.82 15.84v-5.452h-2.494v4.386c0 1.96-.062 2.91-1.594 2.91-1.302 0-1.593-.7-1.593-2.329v-4.974h-2.494v4.947c0 1.427.062 2.501.789 3.34.666.762 1.739 1.115 3.291 1.115 2.931.014 4.095-1.178 4.095-3.943ZM146.862 14.808c0-.187 0-.36-.028-.561h-4.912v1.926h2.494c-.139.99-1.039 1.718-2.342 1.718-1.476 0-2.418-1.053-2.418-2.82 0-1.766.949-2.806 2.418-2.806.818 0 1.455.354 1.968 1.067l2.169-1.053c-.95-1.392-2.342-2.113-4.13-2.113-2.827 0-4.905 2.016-4.905 4.808 0 1.29.499 2.557 1.379 3.444.928.942 2.064 1.35 3.533 1.35 2.972 0 4.774-1.794 4.774-4.96ZM179.106 16.125h-2.495l.929-3.028c.034-.139.152-.547.311-1.226.174.678.264 1.087.312 1.226l.943 3.028Zm3.485 3.43-3.181-9.174h-3.131l-3.174 9.173h2.495l.478-1.642h3.554l.464 1.642h2.495ZM171.104 13.415c0 .894-.554 1.095-1.614 1.095h-.478v-2.155h.499c1.018-.007 1.593.173 1.593 1.06Zm2.425.077c0-1.178-.478-2.135-1.288-2.647-.714-.464-1.629-.478-2.779-.478h-2.806v9.18h2.356v-3.028h1.053c.852 0 1.566-.034 2.189-.415.825-.478 1.275-1.393 1.275-2.612ZM152.77 13.568c0 .817-.499 1.143-1.552 1.143h-.464V12.3h.499c1.039 0 1.517.298 1.517 1.268Zm2.903 5.986-2.501-3.693c1.337-.291 2.065-1.206 2.065-2.633 0-.956-.36-1.732-1.026-2.245-.789-.602-1.766-.616-3.041-.616H148.398v9.18h2.356v-3.596l2.106 3.596h2.813v.007ZM192.453 12.882c1.026 0 1.919.769 1.919 1.92 0 1.024-.893 1.918-1.919 1.918-1.15 0-2.051-.893-2.051-1.919 0-1.15.901-1.92 2.051-1.92Zm0-3.076c2.688 0 4.864 2.307 4.864 4.995a4.862 4.862 0 0 1-4.864 4.864c-2.813 0-4.988-2.176-4.988-4.864 0-2.688 2.175-4.995 4.988-4.995Zm8.834 4.482V12.37h.513c.769 0 1.15.381 1.15 1.026 0 .637-.381 1.025-1.15 1.025h-.513v-.132Zm5.245 5.12L204.1 15.57c1.025-.125 1.795-1.025 1.795-2.307 0-2.05-1.282-3.201-3.714-3.201h-3.839v9.347h2.945v-3.07l1.538 3.07h3.707Zm15.104 0v-2.556h-3.97v-1.15h1.919v-2.176h-1.919v-1.15h3.582V10.07h-6.527v9.347h6.915v-.008Zm9.852 0v-9.346h-2.944V13.388c0 .38.125.893.125 1.538l-3.201-4.864h-2.813v9.347h2.944V15.95c0-.38 0-.894-.125-1.406l3.201 4.864h2.813Zm-17.785 0v-2.556h-2.945v-6.783h-3.325v9.347h6.27v-.008Zm21.243 2.308H184.77V7.762h50.176v13.954Z"
+                              fill="#D81E04"></path>
+                        <path d="M50.187 3.625H38.138a.641.641 0 0 0-.644.527l-2.037 17.134c-.028.312.104.444.415.444h12.195c.36 0 .54-.187.568-.492l.332-2.737H40.01l.52-4.323h8.258l.36-3.104h-8.244l.498-4.22h8.952l.312-2.66c.041-.381-.111-.569-.478-.569Zm9.637 4.144c-2.48 0-4.517.395-6.554 1.15-.256.104-.437.235-.568.443-.132.187-.18.444-.208.68L51.1 21.216c-.027.312.077.52.388.52h3.513l1.316-10.809c.825-.256 1.733-.464 2.606-.464.672 0 1.06.132 1.24.395.131.18.208.464.208.755 0 .208-.028.651-.049.887l-1.08 9.25h3.325c.388 0 .568-.208.623-.52l1.137-8.73c.048-.464.076-.908.076-1.247 0-.915-.18-1.774-.617-2.266-.762-.907-2.258-1.22-3.963-1.22Zm18.423 1.247c-1.004-.887-2.556-1.247-4.517-1.247-.984 0-1.857.131-2.633.367-.748.236-1.393.575-1.96 1.067-.957.804-1.601 1.975-2.017 3.333-.416 1.357-.568 2.868-.568 4.17 0 3.673 2.32 5.363 5.806 5.363 1.753 0 3.229-.229 4.85-.727.34-.104.54-.18.672-.312.104-.132.132-.312.104-.575l-.312-1.795c-1.365.416-2.577.672-4.337.672-.797 0-2.01-.207-2.501-.755-.437-.492-.52-1.095-.492-1.822l1.44-.049c3.334-.103 5.419-.235 6.79-1.697.673-.728.825-1.954.825-2.813.007-1.379-.325-2.446-1.15-3.18Zm-5.785 5.418-1.989.076c.208-1.35.465-2.709 1.268-3.513.416-.395 1.005-.595 1.78-.595.722 0 1.262.18 1.65.512.388.367.54.866.54 1.518 0 1.455-1.08 1.926-3.25 2.002Zm17.737-5.598c.028-.18.048-.416.048-.575 0-.312-.152-.5-.616-.5-.825 0-1.677.077-2.682.209a26.455 26.455 0 0 0-3.228.623c-.492.132-.749.257-.929.444-.18.187-.284.415-.311.783l-1.365 11.328c-.049.388.131.575.443.575h2.84c.416 0 .624-.312.645-.596l1.185-10.213c.72-.18 1.392-.228 2.196-.228.568 0 .956.027 1.524.104l.25-1.954Zm14.155-.998a28.633 28.633 0 0 0-2.425-.083c-.956 0-1.933.028-2.966.083-2.217.125-4.337.492-5.577 1.427-1.212.936-1.933 2.294-1.933 4.268 0 .527.048 1.04.208 1.51.18.52.492.964 1.004 1.303.312.208.7.367 1.24.52-.928.076-1.78.263-2.32.707-.257.18-.465.464-.617.831a3.362 3.362 0 0 0-.236 1.178c0 1.247 1.005 1.898 2.141 2.078.104.028.153.104.153.187 0 .153-.076.188-.18.208-.513.132-.977.208-1.365.333-.388.104-.776.284-1.005.492-.513.443-.776 1.046-.776 1.926 0 1.33.7 2.106 1.78 2.473 1.11.388 2.557.492 3.846.492 2.349 0 4.337-.187 5.758-1.018 1.392-.783 2.064-2.141 2.064-4.012 0-1.379-.464-2.106-1.392-2.598-.88-.499-2.3-.603-3.922-.603h-2.376c-.34 0-.52-.076-.645-.208-.131-.124-.18-.284-.18-.575 0-.312.153-.7.437-.963.18-.187.512-.284 1.004-.284h2.162a6.71 6.71 0 0 0 2.065-.312c.616-.207 1.24-.52 1.704-.963a5.361 5.361 0 0 0 1.032-1.406c.257-.548.416-1.171.416-1.878 0-.803-.388-1.767-1.212-2.446-.028-.027-.077-.076-.077-.152s.049-.132.181-.132c.388 0 1.371.104 1.94.284l.436-2.265c.021-.25-.062-.381-.367-.402Zm-9.319 14.197h2.605c.617 0 .984.048 1.344.256.312.235.617.575.617 1.15 0 .86-.416 1.351-1.032 1.67-.617.312-1.42.388-2.398.388-.492 0-1.289-.056-1.836-.284-.54-.236-.824-.624-.824-1.275 0-.714.623-1.573 1.524-1.905Zm3.95-7.22c-.493.443-1.06.575-1.858.575-.7 0-1.191-.208-1.475-.603-.229-.332-.36-.852-.36-1.538 0-1.018.283-1.878.9-2.418.437-.388 1.109-.52 1.808-.52.672 0 1.137.132 1.448.492.285.32.437.839.437 1.566 0 .936-.284 1.87-.9 2.446Zm17.861-6.499c-.825-.492-2.113-.596-3.541-.547-1.628.027-3.692.284-5.314.706-.824.236-1.108.368-1.108.804 0 .104.027.284.048.444l.284 1.565c1.857-.492 3.742-.859 5.01-.859.568 0 1.06.049 1.392.264.312.152.513.388.513.859 0 .443-.049.886-.104 1.33l-3.485.547c-1.109.16-2.397.367-3.485.887-.7.333-1.213.935-1.573 1.663-.339.707-.464 1.538-.464 2.397 0 1.615.748 2.522 1.808 3.021 1.033.513 2.377.7 3.693.7 1.524 0 3.381-.257 4.954-.7 1.109-.235 1.58-.942 1.732-2.19l.811-6.74c.048-.493.118-1.047.118-1.511-.007-1.337-.444-2.169-1.289-2.64Zm-3.568 10.912a7.905 7.905 0 0 1-2.01.284c-1.087 0-2.272-.02-2.272-1.558 0-1.698.644-1.982 2.293-2.342l2.453-.395c-.409 3.748-.464 3.776-.464 4.011Z"
+                              fill="#D81E04"></path>
+                        <path fill-rule="evenodd" clip-rule="evenodd"
+                              d="M.857 14.004c.734 5.016 5.425 6.839 9.603 6.381 4.954-.547 10.198-3.81 12.7-8.307.921-1.656 1.427-4.22.88-6.506v.014c.907 6.153-6.458 12.915-13.068 13.185-6.048.25-7.746-2.432-7.746-5.363.201.084.409.167.63.236 7.442 2.383 15.555-3.499 16.858-8.453.921-3.506-1.088-5.05-4.227-5.182C13.314-.116 8.831 1.076 5.423 5.19c-.749.922.207 1.788.914.887 2.924-3.499 6.153-4.025 7.926-3.984 1.518.076 2.107 1.65.686 3.624-1.739 2.418-8.48 4.857-11.078 2.737-2.377-1.94-.084-5.266 1.96-7.165.63-.588.291-.838-.34-.415C-.473 4.92-1.152 9.68 1.419 12.224c-.208.554-.402 1.15-.561 1.78ZM24.33 5.42c-.006-.007-.013-.007-.02-.014.873 2.764.166 5.086-.693 6.86-2.356 4.842-8.127 8.542-13.345 9.173-4.233.512-9.034-.742-9.748-5.675-.651 5.016 1.199 10.878 9.201 10.878 7.109 0 13.753-4.587 16.622-10.268.187.25.464.838.595 1.607.021.139.23.118.25-.02.381-2.3.88-8.453-2.861-12.541Z"
+                              fill="#D81E04"></path>
+                        <path d="M129.006 3.625h-1.178v22.996h1.178V3.625ZM35.893 39.037c-.527-.617-.686-1.524-.686-2.404 0-1.87.388-3.748 1.407-4.83.658-.7 1.808-1.094 3.284-1.094 1.344 0 2.328.333 2.84.915.478.526.686 1.462.686 2.494 0 1.884-.36 3.616-1.288 4.753-.631.776-1.767 1.122-3.32 1.122-1.177 0-2.327-.256-2.923-.956Zm1.614-6.499c-.505.568-1.074 2.065-1.074 3.963 0 .852.132 1.372.45 1.795.299.43.957.644 1.975.644 1.109 0 1.795-.118 2.377-.79.762-.894.956-2.612.956-3.942 0-.866-.104-1.462-.437-1.85-.36-.416-.97-.624-1.96-.624-1.15.021-1.822.264-2.287.804ZM46.107 30.425c.013-.132.09-.236.256-.257l.478-.076c.076-.014.18-.027.256-.027.132 0 .194.076.18.207l-.388 3.111c.811-.346 1.483-.478 1.927-.478.685 0 1.302.104 1.76.45.464.347.803.943.803 1.864 0 1.372-.222 2.585-.776 3.45-.54.839-1.462 1.33-2.945 1.33-.748 0-1.51-.117-2.21-.373-.208-.076-.374-.257-.374-.582 0-.028.014-.257.063-.645l.97-7.974Zm1.642 8.653c.907 0 1.538-.256 1.912-.907.36-.617.568-1.642.568-2.723 0-.582-.18-1.06-.45-1.289-.27-.221-.61-.34-1.109-.34-.7 0-1.282.236-1.885.555l-.554 4.434c.561.194.936.27 1.518.27ZM53.223 39.827c-.166 0-.256-.166-.236-.333l.672-5.515c.049-.416.388-.61.596-.672.388-.132.554-.18.984-.256.43-.076.928-.146 1.317-.146.117 0 .194.028.242.076a.309.309 0 0 1 .062.208c0 .104-.014.222-.027.326l-.063.402a5.02 5.02 0 0 0-.803-.049c-.333 0-.811.076-1.199.243l-.644 5.411c-.014.152-.118.312-.333.312h-.568v-.007ZM63.128 33.577c.374.333.686.956.686 1.885 0 .686-.132 1.69-.346 2.348-.208.659-.63 1.24-.97 1.51-.63.52-1.525.673-2.404.673-.853 0-1.476-.146-1.954-.554-.416-.347-.804-1.047-.804-2.044 0-.63.076-1.407.298-2.107.208-.671.582-1.302 1.018-1.655.596-.478 1.358-.735 2.39-.735.874.007 1.573.208 2.086.68Zm-1.392 5.072c.415-.36.644-.984.762-1.497a7.894 7.894 0 0 0 .194-1.676c0-.45-.063-.915-.374-1.213-.298-.284-.686-.436-1.435-.436-.713 0-1.178.221-1.482.52-.402.373-.61.88-.749 1.406-.152.568-.18 1.191-.18 1.676 0 .402.063.901.416 1.268.27.27.804.388 1.393.388.665-.007 1.101-.138 1.455-.436Zm1.06-7.94c.027.041.041.09.041.131 0 .063-.048.132-.145.153l-2.557.72a.718.718 0 0 1-.152.028c-.09 0-.146-.048-.18-.131l-.09-.243a.448.448 0 0 1-.028-.132c0-.062.027-.117.104-.152l2.258-1.088a.418.418 0 0 1 .167-.041c.062 0 .131.027.166.09l.416.665ZM65.713 33.224c.014-.118.118-.18.242-.18h.79l.145-1.109c.028-.166.132-.325.326-.36l.43-.09a1.15 1.15 0 0 1 .18-.028c.076 0 .132.014.166.055.042.042.063.09.063.167 0 .048-.014.166-.028.256l-.146 1.109h1.732c.146 0 .208.076.194.208l-.041.526c-.014.132-.076.18-.236.18h-1.767l-.505 4.171a5.89 5.89 0 0 0-.028.478c0 .153.042.284.132.36.09.077.242.105.45.105.36 0 .866-.063 1.42-.208l.09.346c.014.076.042.152.042.242a.33.33 0 0 1-.076.222c-.049.056-.132.077-.236.104a8.407 8.407 0 0 1-1.732.208c-.464 0-.776-.132-.97-.36-.194-.236-.256-.554-.256-.998 0-.166.041-.596.062-.81l.464-3.867h-.79c-.131 0-.194-.104-.18-.221l.063-.506Z"
+                              fill="#D81E04"></path>
+                    </svg>
+                    <span data-translate="Login.accessibilityTitle" class="sr-only">Energa Obrót, Grupa ORLEN - strona logowania</span>
+                </a>
+<button class="accessibility-button" data-aria-label="Open accessibility options">
+  <svg
+    class="accessibility-button__icon"
+    width="20"
+    height="20"
+    viewBox="0 0 17 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <rect
+      y="5.10498"
+      width="16.3362"
+      height="2.04203"
+      rx="1.02101"
+      fill="#4D4D4D"
+    />
+    <path
+      d="M2.92622 19.4895C2.43787 19.2076 2.27055 18.5831 2.5525 18.0948L6.11271 11.9283L7.88116 12.9493L4.32095 19.1158C4.039 19.6041 3.41456 19.7715 2.92622 19.4895Z"
+      fill="#4D4D4D"
+    />
+    <rect
+      x="6.12598"
+      y="13.2729"
+      width="8.16811"
+      height="4.08405"
+      rx="1"
+      transform="rotate(-90 6.12598 13.2729)"
+      fill="#4D4D4D"
+    />
+    <path
+      d="M13.4121 19.4895C12.9237 19.7714 12.2993 19.6041 12.0173 19.1158L8.45712 12.9493L10.2256 11.9283L13.7858 18.0948C14.0677 18.5831 13.9004 19.2075 13.4121 19.4895Z"
+      fill="#4D4D4D"
+    />
+    <circle cx="8.168" cy="2.04203" r="2.04203" fill="#4D4D4D" />
+  </svg>
+</button>                </h1>
+        </header>
+
+        <section class="page-section fu-104" xmlns="http://www.w3.org/1999/html">
+    <p class="page-section__back-btn-container back-button-placeholder">
+        <button type="submit"
+                class="link-button hidden"
+                id="login-back-button">
+            <svg class="link-button__icon"
+                 aria-hidden
+                 width="24"
+                 height="24"
+                 viewBox="-1 1 24 24"
+                 fill="none"
+                 xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 6L6 12L12 18L13.0651 16.9349L8.91124 12.7456L18 12.7456L18 11.2544L8.91124 11.2544L13.0651 7.06509L12 6Z" fill="#1F1F1F"/>
+            </svg>
+            <span data-translate="Login.back">Powrót</span>
+        </button>
+    </p>
+<h2 class="page-section__header margin-bottom-0" data-translate="Login.heading">Zaloguj się</h2>
+    <p class="page-section__hint">
+        <span data-translate="Login.noAccount">Nie posiadasz konta?</span>
+        <a class="link-button" href="/auth/realms/Energa-Selfcare/login-actions/registration?client_id=energa-selfcare&amp;tab_id=0lInrIh6nyM&amp;client_data=eyJydSI6Imh0dHBzOi8vMjQuZW5lcmdhLnBsL2FwaS9hdXRoL2NhbGxiYWNrL2tleWNsb2FrIiwicnQiOiJjb2RlIn0" data-translate="Login.register">
+            Zarejestruj się
+        </a>
+    </p>
+        <div class="page-section__buttons-container" id="kc-switch-form">
+            <button 
+            class="button block"
+            name="switch"
+            id="kc-switch-button"
+            type="button">
+                <span data-translate="Login.continueWithE24">Zaloguj się kontem Energa24</span>
+            </button>
+
+                        <p class="button-splitter"><span class="button-splitter__description">lub</span></p>
+                        <a class="button block" id="oid-button" type="button" href="/auth/realms/Energa-Selfcare/broker/keycloak-oidc/login?client_id=energa-selfcare&amp;tab_id=0lInrIh6nyM&amp;client_data=eyJydSI6Imh0dHBzOi8vMjQuZW5lcmdhLnBsL2FwaS9hdXRoL2NhbGxiYWNrL2tleWNsb2FrIiwicnQiOiJjb2RlIn0&amp;session_code=t3dd_FbN7W5lE6lihsTLGKV-qLQuDR-Bl5qlB61whFw">
+                            <span class="social-description" data-translate="Login.continueWithOID">Kontynuuj z ORLEN ID</span>
+                        </a>
+                        <p class="page-section__hint block oid" id="oid-hint">
+                            <span data-translate="Login.oidHint">Z ORLEN ID możesz logować się do usług ORLEN za pomocą tych samych danych logowania.</span>
+                            <a class="link-button" 
+                               data-translate="Login.oidHintLinkText" 
+                               data-link="Login.oidHintUrl"
+                               href="#"
+                               target="_blank" 
+                               style="margin-left: 0; display: inline-block;">Dowiedz się więcej</a>
+                        </p>
+        </div>
+
+    <form id="kc-form-login"
+    class="disabled-form"
+    onsubmit="login.disabled = true; return true;"
+    action="https://24.energa.pl/auth/realms/Energa-Selfcare/login-actions/authenticate?session_code=t3dd_FbN7W5lE6lihsTLGKV-qLQuDR-Bl5qlB61whFw&amp;execution=c982359a-fb85-4ab8-9ed0-71956c1cb7e9&amp;client_id=energa-selfcare&amp;tab_id=0lInrIh6nyM&amp;client_data=eyJydSI6Imh0dHBzOi8vMjQuZW5lcmdhLnBsL2FwaS9hdXRoL2NhbGxiYWNrL2tleWNsb2FrIiwicnQiOiJjb2RlIn0"
+    method="post">
+        <div class="page-section__inputs-container padding-top">
+            <div class="input-wrapper required">
+                <label for="username" class="input-wrapper__label" data-translate="Login.usernameOrEmail">
+                    Adres e-mail
+                </label>
+                    <input type="text" name="username"
+                    placeholder="Wpisz adres e-mail" id="username"
+                    class="input-wrapper__input"
+                    value="fileservice@cctuning.eu"
+                    autocomplete="email"
+                    maxlength="50"
+                    data-placeholder="Login.email"
+                    data-js-validator="USERNAME"
+                    data-js-target="data-js-username-error"
+                    aria-invalid=""
+                    >
+                <span id="error-username" class="input-wrapper__description error absolute hidden" aria-live="polite"
+                data-js-username-error data-translate="Login.usernameError">
+                    Błędny e-mail
+                </span>
+            </div>
+
+            <div class="input-wrapper required">
+                <label for="password" class="input-wrapper__label"
+                data-translate="Login.password">Hasło</label>
+                <div class="input-wrapper__content" data-js-password>
+                    <input id="password"
+                    class="input-wrapper__input"
+                    name="password"
+                    placeholder="Hasło"
+                    data-placeholder="Login.password"
+                    data-js-validator="NOT_EMPTY"
+                    data-js-target="data-js-password-error"
+                    type="password"
+                    aria-invalid="true"
+                    />
+                    <button type="button" class="input-wrapper__icon" aria-label="Pokaż hasło">
+                        <svg class="visible" width="24" height="24" fill="none"
+                        xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 6a9.77 9.77 0 0 1 8.82 5.5A9.77 9.77 0 0 1 12 17a9.77 9.77 0 0 1-8.82-5.5A9.77 9.77 0 0 1 12 6Zm0-2C7 4 2.73 7.11 1 11.5 2.73 15.89 7 19 12 19s9.27-3.11 11-7.5C21.27 7.11 17 4 12 4Zm0 5a2.5 2.5 0 0 1 0 5 2.5 2.5 0 0 1 0-5Zm0-2c-2.48 0-4.5 2.02-4.5 4.5S9.52 16 12 16s4.5-2.02 4.5-4.5S14.48 7 12 7Z"
+                            fill="#4D4D4D">
+                            </path>
+                        </svg>
+                        <svg class="visible-off" width="24" height="24"
+                        viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 6.00001C15.79 6.00001 19.17 8.13001 20.82 11.5C20.23 12.72 19.4 13.77 18.41 14.62L19.82 16.03C21.21 14.8 22.31 13.26 23 11.5C21.27 7.11001 17 4.00001 12 4.00001C10.73 4.00001 9.51 4.20001 8.36 4.57001L10.01 6.22001C10.66 6.09001 11.32 6.00001 12 6.00001ZM10.93 7.14001L13 9.21001C13.57 9.46001 14.03 9.92001 14.28 10.49L16.35 12.56C16.43 12.22 16.49 11.86 16.49 11.49C16.5 9.01001 14.48 7.00001 12 7.00001C11.63 7.00001 11.28 7.05001 10.93 7.14001ZM2.01 3.87001L4.69 6.55001C3.06 7.83001 1.77 9.53001 1 11.5C2.73 15.89 7 19 12 19C13.52 19 14.98 18.71 16.32 18.18L19.74 21.6L21.15 20.19L3.42 2.45001L2.01 3.87001ZM9.51 11.37L12.12 13.98C12.08 13.99 12.04 14 12 14C10.62 14 9.5 12.88 9.5 11.5C9.5 11.45 9.51 11.42 9.51 11.37ZM6.11 7.97001L7.86 9.72001C7.63 10.27 7.5 10.87 7.5 11.5C7.5 13.98 9.52 16 12 16C12.63 16 13.23 15.87 13.77 15.64L14.75 16.62C13.87 16.86 12.95 17 12 17C8.21 17 4.83 14.87 3.18 11.5C3.88 10.07 4.9 8.89001 6.11 7.97001Z"
+                            fill="#4D4D4D"/>
+                        </svg>
+                    </button>
+
+                </div>
+                <span id="error-password" class="input-wrapper__description absolute error hidden" aria-live="polite" data-translate="Login.required"
+                data-js-password-error>
+                    Pole wymagane
+                </span>
+            </div>
+            <div class="input-wrapper">
+                <div class="input-wrapper__checkbox-container">
+                        <div class="checkbox">
+                                <input id="rememberMe" name="rememberMe"
+                                type="checkbox" class="checkbox__input">
+                            <label for="rememberMe" class="checkbox__label" data-translate="Login.rememberMe">
+                                <div className="label__icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+                                        <path d="M21 7.00009L9 19.0001L3.5 13.5001L4.91 12.0901L9 16.1701L19.59 5.59009L21 7.00009Z" fill="#4D4D4D" />
+                                    </svg>
+                                </div>
+                                Zapamiętaj mnie
+                            </label>
+                        </div>
+                        <a class="checkbox-container__link"
+                        href="/auth/realms/Energa-Selfcare/login-actions/reset-credentials?client_id=energa-selfcare&amp;tab_id=0lInrIh6nyM&amp;client_data=eyJydSI6Imh0dHBzOi8vMjQuZW5lcmdhLnBsL2FwaS9hdXRoL2NhbGxiYWNrL2tleWNsb2FrIiwicnQiOiJjb2RlIn0" data-translate="Login.forgetPassword">
+                            Nie pamiętasz hasła?
+                        </a>
+                </div>
+            </div>
+
+
+        </div>
+        <div class="page-section__buttons-container">
+            <input type="hidden" id="id-hidden-input" name="credentialId"
+            />
+            <button 
+            class="button block"
+            name="login" id="kc-login" type="submit" disabled>
+                <span data-translate="Login.loginBtn">Zaloguj się</span>
+            </button>
+        </div>
+    </form>
+
+        </section>
+        <div class="banner page-container__banner">
+            <div class="login-slider">
+
+            </div>
+        </div>
+
+
+
+
+
+
+
+
+
+
+    </div>
+<div role="dialog" aria-modal="true" class="popup__wrapper accessibility-panel hide" aria-labeledby="announcement-modal-label">
+  <div class="popup accessibility-modal">
+    <h2 class="popup__header" id="login-modal-title">
+      <span class="header__text" data-translate="AccessibilityPanel.modalTitle">Ułatwienia dostępu</span>
+      <button data-aria-label="AdminLoginErrorModal.ariaLabel" class="header__button-close">
+        <div class="popup__icon">
+          <svg aria-hidden fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="popup__icon" width="24" height="24" color="#b6b6b6">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" fill="#b6b6b6"></path>
+          </svg>
+        </div>
+      </button>
+    </h2>
+    <div class="accessibility-modal__content">
+      <div class="accessibility-modal__row">
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.highContrastLabel" data-accessibility-btn="hightContrast">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 24C15.1826 24 18.2348 22.7357 20.4853 20.4853C22.7357 18.2348 24 15.1826 24 12C24 8.8174 22.7357 5.76516 20.4853 3.51472C18.2348 1.26428 15.1826 4.80559e-07 12 0L12 12L12 24Z" fill="#E6001F"/>
+              <circle cx="12" cy="12" r="11.25" transform="rotate(90 12 12)" stroke="#E6001F" stroke-width="1.5" />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.highContrastLabel">Wysoki kontrast</span>
+          </button>
+        </div>
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.grayLabel" data-accessibility-btn="grayscale">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" width="6" height="24" fill="#E6001F" fill-opacity="0.33" />
+              <rect x="12" width="6" height="24" fill="#E6001F" fill-opacity="0.66" />
+              <path
+                d="M18 0H22C23.1046 0 24 0.895431 24 2V22C24 23.1046 23.1046 24 22 24H18V0Z"
+                fill="#E6001F"
+              />
+              <rect x="0.5" y="0.5" width="23" height="23" rx="1.5" stroke="#E6001F" />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.grayLabel">Skala szarości</span>
+          </button>
+        </div>
+      </div>
+      <div class="accessibility-modal__row accessibility-font-row">
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.fontNormalLabel" data-accessibility-btn="fontMode" data-accessibility-font-size="normal">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M5.7135 8.28L5.5735 8.76H8.8135L8.6735 8.28C8.28683 6.97333 7.96683 5.86 7.7135 4.94C7.4735 4.02 7.32683 3.42667 7.2735 3.16L7.1935 2.76C7.08683 3.49333 6.5935 5.33333 5.7135 8.28ZM4.0135 14H0.793496L5.2935 0.52H9.1735L13.6735 14H10.3735L9.5535 11.24H4.8335L4.0135 14Z"
+                fill="#E6001F"
+              />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.fontNormalLabel">Tekst normalny</span>
+          </button>
+        </div>
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.fontBigLabel" data-accessibility-btn="fontMode" data-accessibility-font-size="big">
+            <svg width="32" height="28" viewBox="0 0 32 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M5.88 14.28L5.74 14.76H8.98L8.84 14.28C8.45333 12.9733 8.13333 11.86 7.88 10.94C7.64 10.02 7.49333 9.42667 7.44 9.16L7.36 8.76C7.25333 9.49333 6.76 11.3333 5.88 14.28ZM4.18 20H0.96L5.46 6.52H9.34L13.84 20H10.54L9.72 17.24H5L4.18 20Z"
+                fill="#E6001F"
+              />
+              <path
+                d="M20.956 13.136L20.788 13.712H24.676L24.508 13.136C24.044 11.568 23.66 10.232 23.356 9.128C23.068 8.024 22.892 7.312 22.828 6.992L22.732 6.512C22.604 7.392 22.012 9.6 20.956 13.136ZM18.916 20H15.052L20.452 3.824H25.108L30.508 20H26.548L25.564 16.688H19.9L18.916 20Z"
+                fill="#E6001F"
+              />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.fontBigLabel">Tekst większy</span>
+          </button>
+        </div>
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.fontSuperLabel" data-accessibility-btn="fontMode" data-accessibility-font-size="super">
+            <svg width="52" height="28" viewBox="0 0 52 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M5.54699 15.28L5.40699 15.76H8.64699L8.50699 15.28C8.12033 13.9733 7.80033 12.86 7.54699 11.94C7.30699 11.02 7.16033 10.4267 7.10699 10.16L7.02699 9.76C6.92033 10.4933 6.42699 12.3333 5.54699 15.28ZM3.84699 21H0.626992L5.12699 7.52H9.00699L13.507 21H10.207L9.38699 18.24H4.66699L3.84699 21Z"
+                fill="#E6001F"
+              />
+              <path
+                d="M20.623 14.136L20.455 14.712H24.343L24.175 14.136C23.711 12.568 23.327 11.232 23.023 10.128C22.735 9.024 22.559 8.312 22.495 7.992L22.399 7.512C22.271 8.392 21.679 10.6 20.623 14.136ZM18.583 21H14.719L20.119 4.824H24.775L30.175 21H26.215L25.231 17.688H19.567L18.583 21Z"
+                fill="#E6001F"
+              />
+              <path
+                d="M38.699 12.992L38.503 13.664H43.039L42.843 12.992C42.3017 11.1627 41.8537 9.604 41.499 8.316C41.163 7.028 40.9577 6.19733 40.883 5.824L40.771 5.264C40.6217 6.29067 39.931 8.86667 38.699 12.992ZM36.319 21H31.811L38.111 2.128H43.543L49.843 21H45.223L44.075 17.136H37.467L36.319 21Z"
+                fill="#E6001F"
+              />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.fontSuperLabel">Tekst największy</span>
+          </button>
+        </div>
+      </div>
+      <div class="accessibility-modal__row">
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.readingLineLabel" data-accessibility-btn="readingLine">
+            <svg width="30" height="23" viewBox="0 0 30 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M10 0.152344H2C0.9 0.152344 0 1.05234 0 2.15234V18.1523C0 19.2523 0.89 20.1523 1.99 20.1523H7.995H10.9975H12C14 20.1523 15 22.1523 15 22.1523V18.1523H16V6.15234V4.15234C16 4.15234 16 0.152344 12 0.152344H10ZM14 18.1523H2V2.15234H9H12C12 2.15234 14 2.15234 14 4.15234C14 5.15234 14 7.15234 14 7.15234V18.1523Z"
+                fill="#E6001F"
+              />
+              <path d="M12 5.15234H4V7.15234H12V5.15234Z" fill="#E6001F" />
+              <path d="M12 11.1523H4V13.1523H12V11.1523Z" fill="#E6001F" />
+              <path
+                d="M20 0.152344H28C29.1 0.152344 30 1.05234 30 2.15234V18.1523C30 19.2523 29.11 20.1523 28.01 20.1523H22.005H19.0025H18C16 20.1523 15 22.1523 15 22.1523V18.1523H14V6.15234V4.15234C14 4.15234 14 0.152344 18 0.152344H20ZM16 18.1523H28V2.15234H21H18C18 2.15234 16 2.15234 16 4.15234C16 5.15234 16 7.15234 16 7.15234V18.1523Z"
+                fill="#E6001F"
+              />
+              <path d="M18 5.15234H26V7.15234H18V5.15234Z" fill="#E6001F" />
+              <path d="M18 11.1523H26V13.1523H18V11.1523Z" fill="#E6001F" />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.readingLineLabel">Ułatwienia do czytania</span>
+          </button>
+        </div>
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.bigCursorLabel" data-accessibility-btn="bigCursor">
+            <svg width="24" height="26" viewBox="0 0 24 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle
+                cx="12"
+                cy="11.3223"
+                r="10.3223"
+                stroke="#E6001F"
+                stroke-width="2"
+              />
+              <path
+                d="M17.0894 11.571L14.4644 12.6765C14.1168 12.8231 13.9896 13.2509 14.1997 13.5642L15.8267 15.991L14.2856 17.0388L12.4751 14.324C12.3064 14.0711 11.9814 13.9893 11.7183 14.115L11.6099 14.1814L9.33154 15.9343L8.73682 5.29175L17.0894 11.571Z"
+                stroke="#E6001F"
+              />
+              <path
+                d="M21.2384 24.9448C21.5919 25.369 22.2225 25.4264 22.6468 25.0728C23.071 24.7192 23.1284 24.0887 22.7748 23.6644L21.2384 24.9448ZM17.8774 19.3496L17.1092 19.9898L21.2384 24.9448L22.0066 24.3046L22.7748 23.6644L18.6457 18.7094L17.8774 19.3496Z"
+                fill="#E6001F"
+              />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.bigCursorLabel">Powiększenie kursora</span>
+          </button>
+        </div>
+      </div>
+      <div class="accessibility-modal__row">
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.underlineLinksLabel" data-accessibility-btn="underscoreLinks">
+            <svg width="26" height="19" viewBox="0 0 26 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M6.31945 8.58469L6.17945 9.06469H9.41945L9.27945 8.58469C8.89279 7.27802 8.57279 6.16469 8.31945 5.24469C8.07945 4.32469 7.93279 3.73135 7.87945 3.46469L7.79945 3.06469C7.69279 3.79802 7.19945 5.63802 6.31945 8.58469ZM4.61945 14.3047H1.39945L5.89945 0.824687H9.77945L14.2795 14.3047H10.9795L10.1595 11.5447H5.43945L4.61945 14.3047ZM19.668 12.3047C20.0814 12.3047 20.4014 12.178 20.628 11.9247C20.8547 11.6714 20.968 11.3247 20.968 10.8847V10.1447H20.028C19.5347 10.1447 19.1547 10.2514 18.888 10.4647C18.6214 10.678 18.488 10.9514 18.488 11.2847C18.488 11.9647 18.8814 12.3047 19.668 12.3047ZM21.108 13.0647C20.6814 13.9314 19.8414 14.3647 18.588 14.3647C17.6014 14.3647 16.828 14.0847 16.268 13.5247C15.7214 12.9647 15.448 12.2647 15.448 11.4247C15.448 10.4514 15.8014 9.69802 16.508 9.16469C17.228 8.61802 18.288 8.34469 19.688 8.34469H20.968V7.64469C20.968 6.79135 20.4014 6.36469 19.268 6.36469C18.1747 6.36469 17.1614 6.67135 16.228 7.28469V4.66469C17.028 4.21135 18.1814 3.98469 19.688 3.98469C21.128 3.98469 22.2014 4.29802 22.908 4.92469C23.6147 5.53802 23.968 6.49802 23.968 7.80469V14.3047H21.108V13.0647Z"
+                fill="#E6001F"
+              />
+              <path
+                d="M0.939453 17.3047H25.068V18.3047H0.939453V17.3047Z"
+                fill="#E6001F"
+              />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.underlineLinksLabel">Podkreślenie linków</span>
+          </button>
+        </div>
+        <div class="accessibility-modal__element">
+          <button class="accessibility-modal__button" aria-label="AccessibilityPanel.animationLabel" data-accessibility-btn="noMotion">
+            <svg width="14" height="21" viewBox="0 0 14 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect y="0.304688" width="4" height="20" rx="2" fill="#E6001F" />
+              <rect x="10" y="0.304688" width="4" height="20" rx="2" fill="#E6001F" />
+            </svg>
+            <span class="accessibility-modal__text" aria-hidden="true" data-translate="AccessibilityPanel.animationLabel">Wyłączenie animacji</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="accessibility-reading-line__bar"></div><footer class="footer">
+    <nav class="footer__content">
+        <ul class="footer__links" role="list">
+			<li class="footer__link">
+				<a data-link="Footer.defaultAccessibilityLink" data-translate="Footer.defaultAccessibilityLabel" target="_blank">Deklaracja dostępności</a>
+			</li>
+            <li class="footer__link">
+				<a href='#cookie-settings' data-translate="Footer.cookieSettings">Ustawienia cookies</a>
+			</li>
+        </ul>
+        <p class="footer__copyright"><span class="footer__copyright-year"></span> <span lang="en" data-translate="Footer.copyright">Copyright by</span> <span data-translate="Footer.copyrightCompany">Energa</span></p>
+    </nav>
+</footer>    </main>
+    <div role="dialog" aria-modal="true" class="popup__wrapper hide" id="login-modal" aria-labelledby="login-modal-title">
+        <div class="popup">
+            <h2 class="popup__header" id="login-modal-title">
+                <div class="popup__icon">
+                    <svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="popup__icon red" width="24" height="24" color="#d81e04">
+                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 23C18.0751 23 23 18.0751 23 12C23 5.92487 18.0751 1 12 1C5.92487 1 1 5.92487 1 12C1 18.0751 5.92487 23 12 23ZM10.4032 5.87402H13.5961L13.3041 14.894H10.6952L10.4032 5.87402ZM13.6532 17.4077C13.6405 18.3218 12.8725 19.0581 12.0028 19.0581C11.0888 19.0581 10.3398 18.3218 10.3525 17.4077C10.3398 16.5063 11.0888 15.7764 12.0028 15.7764C12.8725 15.7764 13.6405 16.5063 13.6532 17.4077Z" fill="#d81e04"/>
+                    </svg>
+                </div>
+                <span class="header__text" data-translate="LoginErrorModal.header">Niepoprawne dane logowania</span>
+                <button data-aria-label="LoginErrorModal.ariaLabel" class="header__button-close">
+                    <div class="popup__icon">
+                        <svg aria-hidden fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="popup__icon"
+                             width="24" height="24" color="#b6b6b6">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"
+                                  fill="#b6b6b6"></path>
+                        </svg>
+                    </div>
+                </button>
+
+            </h2>
+            <div class="popup__content">
+                <span data-translate="LoginErrorModal.content">Wprowadzone dane nie są poprawne. Spróbuj ponownie później.</span>
+            </div>
+        </div>
+    </div>
+
+
+    <div role="dialog" aria-modal="true"  class="popup__wrapper hide" id="blocked-modal" aria-labelledby="blocked-modal-title">
+        <div class="popup">
+            <h2 class="popup__header" id="blocked-modal-title">
+                <div class="popup__icon">
+                    <svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="popup__icon red" width="24" height="24" color="#d81e04">
+                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 23C18.0751 23 23 18.0751 23 12C23 5.92487 18.0751 1 12 1C5.92487 1 1 5.92487 1 12C1 18.0751 5.92487 23 12 23ZM10.4032 5.87402H13.5961L13.3041 14.894H10.6952L10.4032 5.87402ZM13.6532 17.4077C13.6405 18.3218 12.8725 19.0581 12.0028 19.0581C11.0888 19.0581 10.3398 18.3218 10.3525 17.4077C10.3398 16.5063 11.0888 15.7764 12.0028 15.7764C12.8725 15.7764 13.6405 16.5063 13.6532 17.4077Z" fill="#d81e04"/>
+                    </svg>
+                </div>
+                <span class="header__text" data-translate="BlockedErrorModal.header">Konto jest nieaktywne.</span>
+                <button data-aria-label="BlockedErrorModal.ariaLabel" class="header__button-close">
+                    <div class="popup__icon">
+                        <svg aria-hidden fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="popup__icon"
+                             width="24" height="24" color="#b6b6b6">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"
+                                  fill="#b6b6b6"></path>
+                        </svg>
+                    </div>
+                </button>
+
+            </h2>
+            <div class="popup__content">
+                <span data-translate="BlockedErrorModal.content">Skontaktuj się z administratorem.</span>
+            </div>
+        </div>
+    </div>
+    </body>
+    </html>

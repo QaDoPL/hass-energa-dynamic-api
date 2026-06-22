@@ -59,6 +59,7 @@ class EnergaAPI:
         self._energa24_account_id = None
         self._energa24_price_list_id = None
         self._energa24_session = None  # Dedicated session for 24.energa.pl
+        self._energa24_token_updated_cb = None  # Callback for token rotation persistence
 
     def set_hass(self, hass):
         """Set Home Assistant instance reference for database queries."""
@@ -94,7 +95,18 @@ class EnergaAPI:
                 except (ValueError, TypeError, aiohttp.ContentTypeError):
                     raise EnergaConnectionError("Invalid JSON")
                 if not data.get("success"):
-                    raise EnergaAuthError("Invalid credentials (API success=False)")
+                    error_msg = str(data.get("error") or data.get("message") or "")
+                    if error_msg and any(
+                        kw in error_msg.lower() for kw in (
+                            "login", "password", "username", "credentials", "auth",
+                        )
+                    ):
+                        raise EnergaAuthError(
+                            f"Invalid credentials (API: {error_msg})"
+                        )
+                    raise EnergaConnectionError(
+                        "API returned success=False (possible server outage)"
+                    )
 
                 # Token might be missing in newer API versions; session cookies are sufficient
                 self._token = data.get("token") or (data.get("response") or {}).get(
@@ -117,11 +129,12 @@ class EnergaAPI:
             self._meters_data = await self._fetch_all_meters()
 
         tz = ZoneInfo("Europe/Warsaw")
+        # Construct midnight using datetime constructor (not .replace())
+        # to correctly resolve UTC offset on DST transition days (#26)
+        today = datetime.now(tz).date()
         ts = int(
-            datetime.now(tz)
-            .replace(hour=0, minute=0, second=0, microsecond=0)
-            .timestamp()
-            * 1000
+            datetime(today.year, today.month, today.day, 0, 0, 0,
+                     tzinfo=tz).timestamp() * 1000
         )
 
         updated_meters = []
@@ -163,7 +176,9 @@ class EnergaAPI:
         self._meters_data = updated_meters
         return updated_meters
 
-    async def async_get_history_hourly(self, meter_point_id, date: datetime):
+    async def async_get_history_hourly(
+        self, meter_point_id, date: datetime, include_timestamps: bool = False
+    ):
         meter = next(
             (m for m in self._meters_data if m["meter_point_id"] == meter_point_id),
             None,
@@ -177,39 +192,46 @@ class EnergaAPI:
             if not meter:
                 return {"import": [], "export": []}
 
+        # Construct midnight using datetime constructor (not .replace())
+        # to correctly resolve UTC offset on DST transition days (#26).
         tz = ZoneInfo("Europe/Warsaw")
+        day = date.date() if hasattr(date, 'date') else date
         ts = int(
-            date.replace(hour=0, minute=0, second=0, microsecond=0)
-            .astimezone(tz)
-            .timestamp()
-            * 1000
+            datetime(day.year, day.month, day.day, 0, 0, 0,
+                     tzinfo=tz).timestamp() * 1000
         )
 
         result = {"import": [], "export": []}
         if meter.get("obis_plus"):
             # Total import (sum of all zones)
             result["import"] = await self._fetch_chart(
-                meter["meter_point_id"], meter["obis_plus"], ts
+                meter["meter_point_id"], meter["obis_plus"], ts,
+                include_timestamps=include_timestamps,
             )
             # Per-zone import for G12w
             if meter.get("zone_count", 1) > 1:
                 result["import_1"] = await self._fetch_chart(
-                    meter["meter_point_id"], meter["obis_plus"], ts, zone_index=0
+                    meter["meter_point_id"], meter["obis_plus"], ts,
+                    zone_index=0, include_timestamps=include_timestamps,
                 )
                 result["import_2"] = await self._fetch_chart(
-                    meter["meter_point_id"], meter["obis_plus"], ts, zone_index=1
+                    meter["meter_point_id"], meter["obis_plus"], ts,
+                    zone_index=1, include_timestamps=include_timestamps,
                 )
         if meter.get("obis_minus"):
             result["export"] = await self._fetch_chart(
-                meter["meter_point_id"], meter["obis_minus"], ts
+                meter["meter_point_id"], meter["obis_minus"], ts,
+                include_timestamps=include_timestamps,
             )
             # Per-zone export for G12w
             if meter.get("zone_count", 1) > 1:
                 result["export_1"] = await self._fetch_chart(
-                    meter["meter_point_id"], meter["obis_minus"], ts, zone_index=0
+                    meter["meter_point_id"], meter["obis_minus"], ts,
+                    zone_index=0, include_timestamps=include_timestamps,
                 )
                 result["export_2"] = await self._fetch_chart(
-                    meter["meter_point_id"], meter["obis_minus"], ts, zone_index=1
+                    meter["meter_point_id"], meter["obis_minus"], ts,
+                    zone_index=1, include_timestamps=include_timestamps,
                 )
 
         _LOGGER.debug(
@@ -283,17 +305,29 @@ class EnergaAPI:
             if day_offset > 0:
                 await asyncio.sleep(0.3)
 
-            day_data = await self.async_get_history_hourly(meter_point_id, target_date)
+            day_data = await self.async_get_history_hourly(
+                meter_point_id, target_date, include_timestamps=True
+            )
 
-            day_start = target_date.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ).astimezone(tz)
-
-            # Process each data key
+            # Process each data key — use API-provided timestamps
+            # instead of computing from array index (#26).
+            # On DST spring-forward, the API returns 23 points (not 24)
+            # with correct Unix timestamps for each hour.
             for key in keys:
-                for hour_idx, hourly_value in enumerate(day_data.get(key, [])):
+                for item in day_data.get(key, []):
+                    # With include_timestamps=True, items are
+                    # (value, timestamp_ms) tuples
+                    if isinstance(item, (list, tuple)):
+                        hourly_value, tm_ms = item
+                    else:
+                        # Fallback for unexpected format
+                        continue
+
                     if hourly_value is not None and hourly_value >= 0:
-                        hour_dt = day_start + timedelta(hours=hour_idx)
+                        hour_dt = datetime.fromtimestamp(
+                            tm_ms / 1000, tz=tz
+                        )
+
                         # Only include points after start_date
                         if hour_dt >= start_date:
                             all_points[key].append(
@@ -433,8 +467,9 @@ class EnergaAPI:
         return meters_found
 
     async def _fetch_chart(
-        self, meter_id: str, obis: str, timestamp: int, zone_index: int | None = None
-    ) -> list[float]:
+        self, meter_id: str, obis: str, timestamp: int,
+        zone_index: int | None = None, include_timestamps: bool = False,
+    ) -> list:
         """Fetch chart data for a meter.
 
         Args:
@@ -442,6 +477,9 @@ class EnergaAPI:
             obis: OBIS code (e.g. 1-0:1.8.0*255)
             timestamp: Day timestamp in milliseconds
             zone_index: None=sum all zones, 0=zone 1, 1=zone 2
+            include_timestamps: If True, return list of (value, tm_ms) tuples
+                               instead of just values. Used for statistics
+                               to correctly handle DST transitions (#26).
         """
         params = {
             "meterPoint": meter_id,
@@ -460,11 +498,17 @@ class EnergaAPI:
                 if zone_index is not None:
                     # Specific zone
                     val = zones[zone_index] if zone_index < len(zones) else None
-                    results.append(val or 0.0)
+                    val = val or 0.0
                 else:
                     # Sum all zones (total)
-                    total = sum(z or 0.0 for z in zones)
-                    results.append(total)
+                    val = sum(z or 0.0 for z in zones)
+
+                if include_timestamps:
+                    # Return (value, timestamp_ms) for DST-safe mapping
+                    tm_ms = int(p.get("tm", 0))
+                    results.append((val, tm_ms))
+                else:
+                    results.append(val)
             return results
         except EnergaTokenExpiredError:
             raise  # Propagate to coordinator for re-login
@@ -561,8 +605,17 @@ class EnergaAPI:
             await self._energa24_session.close()
             self._energa24_session = None
 
+    def set_energa24_token_updated_callback(self, callback):
+        """Register a callback to persist refreshed tokens to config entry."""
+        self._energa24_token_updated_cb = callback
+
     async def async_refresh_energa24_token(self) -> str | None:
-        """Refresh the Energa24 access token using the refresh token."""
+        """Refresh the Energa24 access token using the refresh token.
+
+        Handles token rotation: if Keycloak returns a new refresh_token,
+        persists it via the registered callback so manual re-entry is
+        never needed.
+        """
         if not self._energa24_refresh_token:
             _LOGGER.debug("No Energa24 refresh token set")
             return None
@@ -591,6 +644,22 @@ class EnergaAPI:
                     self._energa24_access_token = body.get("access_token")
                     expires_in = body.get("expires_in", 300)
                     self._energa24_token_expires = time.time() + float(expires_in)
+
+                    # Token rotation: persist new refresh_token if issued
+                    new_refresh = body.get("refresh_token")
+                    if new_refresh and new_refresh != self._energa24_refresh_token:
+                        _LOGGER.info(
+                            "Energa24: refresh token rotated, persisting new token"
+                        )
+                        self._energa24_refresh_token = new_refresh
+                        if self._energa24_token_updated_cb:
+                            try:
+                                self._energa24_token_updated_cb(new_refresh)
+                            except Exception as cb_err:
+                                _LOGGER.warning(
+                                    "Failed to persist rotated token: %s", cb_err
+                                )
+
                     _LOGGER.info("Energa24 access token refreshed successfully")
                     return self._energa24_access_token
                 else:
@@ -605,6 +674,102 @@ class EnergaAPI:
             _LOGGER.error("Error refreshing Energa24 token: %s", err)
             return None
         return None
+
+    async def async_discover_energa24_ids(self) -> dict | None:
+        """Auto-discover account_id and price_list_id from Energa24 API.
+
+        Uses the configured refresh token to obtain an access token,
+        then queries the API to find the user's account and active
+        dynamic price list. Returns dict with account_id and
+        price_list_id, or None on failure.
+        """
+        access_token = await self.async_refresh_energa24_token()
+        if not access_token:
+            _LOGGER.error("Energa24: cannot discover IDs — no access token")
+            return None
+
+        api_headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+            "KeycloakId": self._extract_keycloak_id(access_token),
+            "X-Client-Type": "WEB",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://24.energa.pl/",
+            "Origin": "https://24.energa.pl",
+        }
+
+        e24_session = await self._get_energa24_session()
+
+        # Step 1: Discover account_id from /api/accounts
+        account_id = None
+        try:
+            async with e24_session.get(
+                "https://24.energa.pl/api/accounts", headers=api_headers
+            ) as resp:
+                if resp.status == 200:
+                    accounts = await resp.json()
+                    if accounts and isinstance(accounts, list) and len(accounts) > 0:
+                        account_id = str(accounts[0].get("id"))
+                        _LOGGER.info(
+                            "Energa24: auto-discovered account_id=%s", account_id
+                        )
+                else:
+                    _LOGGER.warning(
+                        "Energa24: /api/accounts returned HTTP %d", resp.status
+                    )
+        except Exception as err:
+            _LOGGER.warning("Energa24: failed to query /api/accounts: %s", err)
+
+        if not account_id:
+            _LOGGER.error("Energa24: could not discover account_id")
+            return None
+
+        # Step 2: Discover price_list_id from dynamic offer list
+        price_list_id = None
+        try:
+            async with e24_session.get(
+                f"https://24.energa.pl/api/accounts/{account_id}/price-list-dynamic-offer",
+                headers=api_headers,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        # Each item has an 'id' field
+                        price_list_id = str(data[0].get("id"))
+                        _LOGGER.info(
+                            "Energa24: auto-discovered price_list_id=%s",
+                            price_list_id,
+                        )
+                    elif isinstance(data, dict):
+                        # Some API versions return a dict
+                        price_list_id = str(data.get("id") or "")
+                else:
+                    _LOGGER.warning(
+                        "Energa24: price-list-dynamic-offer returned HTTP %d",
+                        resp.status,
+                    )
+        except Exception as err:
+            _LOGGER.warning(
+                "Energa24: failed to query price-list-dynamic-offer: %s", err
+            )
+
+        if not price_list_id:
+            _LOGGER.error("Energa24: could not discover price_list_id")
+            return None
+
+        # Store discovered IDs
+        self._energa24_account_id = account_id
+        self._energa24_price_list_id = price_list_id
+
+        return {"account_id": account_id, "price_list_id": price_list_id}
+
+    async def async_validate_energa24(self) -> bool:
+        """Validate Energa24 configuration by testing a price fetch."""
+        if not self._energa24_refresh_token:
+            return False
+        prices = await self.async_get_dynamic_prices()
+        return prices is not None and len(prices) > 0
 
     def set_energa24_ids(self, account_id: str, price_list_id: str):
         """Set Energa24 account and price list IDs from config."""

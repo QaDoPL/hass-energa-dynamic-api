@@ -20,7 +20,10 @@
         "error": {
             "cannot_connect": "Błąd połączenia z API",
             "invalid_auth": "Błędne hasło lub login",
-            "unknown": "Nieznany błąd"
+            "unknown": "Nieznany błąd",
+            "empty_token": "Refresh token nie może być pusty",
+            "energa24_discover_failed": "Nie udało się wykryć ID konta/listy cenowej — sprawdź refresh token",
+            "energa24_validate_failed": "Walidacja tokena nie powiodła się — brak danych cenowych"
         },
         "abort": {
             "already_configured": "To konto jest już skonfigurowane",
@@ -54,17 +57,15 @@
                     "import_price_2": "Cena za kWh strefa 2 (tania) [PLN]",
                     "export_price": "Stawka za kWh (produkcja) [PLN]",
                     "prosumer_coefficient": "Współczynnik prosumencki (0-1)",
-                    "balance_baseline_import": "Wartość bazowa importu [kWh]",
-                    "balance_baseline_export": "Wartość bazowa eksportu [kWh]"
+                    "balance_baseline_import": "Bazowy odczyt importu prosumenta [kWh]",
+                    "balance_baseline_export": "Bazowy odczyt eksportu prosumenta [kWh]"
                 }
             },
             "energa24": {
                 "title": "Taryfa Dynamiczna Energa24",
-                "description": "Wklej Refresh Token z konsoli przeglądarki. Account ID i Price List ID są wstępnie wypełnione; zmień tylko jeśli to konieczne.",
+                "description": "{hint}",
                 "data": {
-                    "energa24_refresh_token": "Refresh Token (Długowieczna Autoryzacja)",
-                    "energa24_account_id": "Account ID (Energa24)",
-                    "energa24_price_list_id": "Price List ID (PPE)"
+                    "energa24_refresh_token": "Refresh Token"
                 }
             },
             "history": {

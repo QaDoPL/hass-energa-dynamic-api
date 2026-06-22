@@ -320,30 +320,79 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             )
 
     async def async_step_energa24(self, user_input=None):
-        """Handle Energa24 dynamic pricing configuration."""
+        """Handle Energa24 dynamic pricing configuration.
+
+        Simplified flow: user only needs to paste the refresh_token.
+        Account ID and Price List ID are auto-discovered from the API
+        and validated before saving.
+        """
+        errors = {}
         if user_input is not None:
-            new_options = {**self._config_entry.options, **user_input}
-            return self.async_create_entry(title="", data=new_options)
+            refresh_token = user_input.get(CONF_ENERGA24_REFRESH_TOKEN, "").strip()
+
+            if not refresh_token:
+                errors[CONF_ENERGA24_REFRESH_TOKEN] = "empty_token"
+            else:
+                # Validate token and auto-discover IDs
+                import secrets
+                session = aiohttp.ClientSession()
+                try:
+                    username = self._config_entry.data.get(CONF_USERNAME, "energa24")
+                    password = self._config_entry.data.get(CONF_PASSWORD, "")
+                    device_token = self._config_entry.data.get(
+                        CONF_DEVICE_TOKEN
+                    ) or secrets.token_hex(32)
+
+                    from .api import EnergaAPI
+                    api = EnergaAPI(username, password, device_token, session)
+                    api.set_energa24_refresh_token(refresh_token)
+
+                    discovered = await api.async_discover_energa24_ids()
+                    if not discovered:
+                        errors["base"] = "energa24_discover_failed"
+                    else:
+                        # Validate by fetching actual prices
+                        valid = await api.async_validate_energa24()
+                        if not valid:
+                            errors["base"] = "energa24_validate_failed"
+                        else:
+                            new_options = {
+                                **self._config_entry.options,
+                                CONF_ENERGA24_REFRESH_TOKEN: refresh_token,
+                                CONF_ENERGA24_ACCOUNT_ID: discovered["account_id"],
+                                CONF_ENERGA24_PRICE_LIST_ID: discovered["price_list_id"],
+                            }
+                            await api.async_close_energa24_session()
+                            await session.close()
+                            return self.async_create_entry(
+                                title="", data=new_options
+                            )
+                    await api.async_close_energa24_session()
+                except Exception as err:
+                    _LOGGER.warning("Energa24 validation error: %s", err)
+                    errors["base"] = "energa24_validate_failed"
+                finally:
+                    await session.close()
 
         current_token = self._config_entry.options.get(CONF_ENERGA24_REFRESH_TOKEN, "")
-        current_account = self._config_entry.options.get(CONF_ENERGA24_ACCOUNT_ID, DEFAULT_ENERGA24_ACCOUNT_ID)
-        current_price_list = self._config_entry.options.get(CONF_ENERGA24_PRICE_LIST_ID, DEFAULT_ENERGA24_PRICE_LIST_ID)
 
         return self.async_show_form(
             step_id="energa24",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
+                    vol.Required(
                         CONF_ENERGA24_REFRESH_TOKEN, default=current_token
-                    ): str,
-                    vol.Optional(
-                        CONF_ENERGA24_ACCOUNT_ID, default=current_account
-                    ): str,
-                    vol.Optional(
-                        CONF_ENERGA24_PRICE_LIST_ID, default=current_price_list
                     ): str,
                 }
             ),
+            errors=errors,
+            description_placeholders={
+                "hint": (
+                    "Wklej Refresh Token z konsoli przeglądarki (F12 → Application → "
+                    "Local Storage → 24.energa.pl → refresh_token).\n\n"
+                    "Account ID i Price List ID zostaną wykryte automatycznie."
+                ),
+            },
         )
 
     async def async_step_history(self, user_input=None):

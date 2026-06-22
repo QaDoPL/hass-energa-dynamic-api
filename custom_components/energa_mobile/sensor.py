@@ -71,6 +71,33 @@ async def async_setup_entry(
         account_id = entry.options.get(CONF_ENERGA24_ACCOUNT_ID, DEFAULT_ENERGA24_ACCOUNT_ID)
         price_list_id = entry.options.get(CONF_ENERGA24_PRICE_LIST_ID, DEFAULT_ENERGA24_PRICE_LIST_ID)
         api.set_energa24_ids(account_id, price_list_id)
+
+        # Auto-discover IDs if using defaults (they were never configured)
+        if account_id == DEFAULT_ENERGA24_ACCOUNT_ID or price_list_id == DEFAULT_ENERGA24_PRICE_LIST_ID:
+            _LOGGER.info("Energa24: attempting auto-discovery of account/price list IDs")
+            try:
+                discovered = await api.async_discover_energa24_ids()
+                if discovered:
+                    new_opts = dict(entry.options)
+                    new_opts[CONF_ENERGA24_ACCOUNT_ID] = discovered["account_id"]
+                    new_opts[CONF_ENERGA24_PRICE_LIST_ID] = discovered["price_list_id"]
+                    hass.config_entries.async_update_entry(entry, options=new_opts)
+                    _LOGGER.info(
+                        "Energa24: auto-discovered and saved account_id=%s, price_list_id=%s",
+                        discovered["account_id"],
+                        discovered["price_list_id"],
+                    )
+            except Exception as err:
+                _LOGGER.warning("Energa24: auto-discovery failed: %s", err)
+
+        # Register callback to persist rotated refresh tokens automatically
+        def _persist_rotated_token(new_token: str):
+            new_opts = dict(entry.options)
+            new_opts[CONF_ENERGA24_REFRESH_TOKEN] = new_token
+            hass.config_entries.async_update_entry(entry, options=new_opts)
+
+        api.set_energa24_token_updated_callback(_persist_rotated_token)
+
         _LOGGER.info("Energa24 configured: account=%s, price_list=%s", account_id, price_list_id)
 
     # Get integration version for device info
@@ -146,6 +173,29 @@ async def async_setup_entry(
             )
         )
 
+        # 1b. Zone-specific Import totals for G12w (#29)
+        if has_zones:
+            sensors.append(
+                EnergaLiveSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="total_plus_1",
+                    name="Stan Licznika Import Strefa 1",
+                    icon="mdi:counter",
+                    device_info=device_info,
+                )
+            )
+            sensors.append(
+                EnergaLiveSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="total_plus_2",
+                    name="Stan Licznika Import Strefa 2",
+                    icon="mdi:counter",
+                    device_info=device_info,
+                )
+            )
+
         # 2. Total Export (Production to grid - lifetime counter)
         if meter.get("total_minus"):
             sensors.append(
@@ -154,6 +204,29 @@ async def async_setup_entry(
                     meter_id=meter_id,
                     data_key="total_minus",
                     name="Stan Licznika Export",
+                    icon="mdi:counter",
+                    device_info=device_info,
+                )
+            )
+
+        # 2b. Zone-specific Export totals for G12w prosumers (#29)
+        if has_zones and meter.get("total_minus"):
+            sensors.append(
+                EnergaLiveSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="total_minus_1",
+                    name="Stan Licznika Export Strefa 1",
+                    icon="mdi:counter",
+                    device_info=device_info,
+                )
+            )
+            sensors.append(
+                EnergaLiveSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    data_key="total_minus_2",
+                    name="Stan Licznika Export Strefa 2",
                     icon="mdi:counter",
                     device_info=device_info,
                 )
@@ -839,6 +912,10 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
             "net_export_kwh": round(net_export, 2),
             "coefficient": coefficient,
             "effective_export_kwh": round(net_export * coefficient, 2),
+            "calculation_method": "API meter totals minus baselines",
+            "formula": "(export − baseline_export) × coefficient − (import − baseline_import)",
+            "source": "Energa API: real-time meter readings (lastMeasurements)",
+            "note": "Ustaw baseline_import/export w Opcjach integracji na stan licznika z początku okresu rozliczeniowego",
         }
 
     @property

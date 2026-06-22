@@ -20,7 +20,10 @@
         "error": {
             "cannot_connect": "Connection error",
             "invalid_auth": "Invalid authentication",
-            "unknown": "Unknown error"
+            "unknown": "Unknown error",
+            "empty_token": "Refresh token cannot be empty",
+            "energa24_discover_failed": "Could not auto-discover account/price list IDs — check your refresh token",
+            "energa24_validate_failed": "Token validation failed — no price data returned"
         },
         "abort": {
             "already_configured": "Account already configured",
@@ -54,17 +57,15 @@
                     "import_price_2": "Zone 2 price per kWh (off-peak) [PLN]",
                     "export_price": "Rate per kWh (production) [PLN]",
                     "prosumer_coefficient": "Prosumer coefficient (0-1)",
-                    "balance_baseline_import": "Import baseline [kWh]",
-                    "balance_baseline_export": "Export baseline [kWh]"
+                    "balance_baseline_import": "Prosumer baseline import [kWh]",
+                    "balance_baseline_export": "Prosumer baseline export [kWh]"
                 }
             },
             "energa24": {
                 "title": "Energa24 Dynamic Pricing",
-                "description": "Enter the Refresh Token to automatically fetch hourly prices. Account ID and Price List ID are pre-filled; change only if needed.",
+                "description": "{hint}",
                 "data": {
-                    "energa24_refresh_token": "Refresh Token (Session Auth)",
-                    "energa24_account_id": "Account ID (Energa24)",
-                    "energa24_price_list_id": "Price List ID (PPE)"
+                    "energa24_refresh_token": "Refresh Token"
                 }
             },
             "history": {
