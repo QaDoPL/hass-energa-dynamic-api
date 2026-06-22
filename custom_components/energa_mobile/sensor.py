@@ -72,24 +72,6 @@ async def async_setup_entry(
         price_list_id = entry.options.get(CONF_ENERGA24_PRICE_LIST_ID, DEFAULT_ENERGA24_PRICE_LIST_ID)
         api.set_energa24_ids(account_id, price_list_id)
 
-        # Auto-discover IDs if using defaults (they were never configured)
-        if account_id == DEFAULT_ENERGA24_ACCOUNT_ID or price_list_id == DEFAULT_ENERGA24_PRICE_LIST_ID:
-            _LOGGER.info("Energa24: attempting auto-discovery of account/price list IDs")
-            try:
-                discovered = await api.async_discover_energa24_ids()
-                if discovered:
-                    new_opts = dict(entry.options)
-                    new_opts[CONF_ENERGA24_ACCOUNT_ID] = discovered["account_id"]
-                    new_opts[CONF_ENERGA24_PRICE_LIST_ID] = discovered["price_list_id"]
-                    hass.config_entries.async_update_entry(entry, options=new_opts)
-                    _LOGGER.info(
-                        "Energa24: auto-discovered and saved account_id=%s, price_list_id=%s",
-                        discovered["account_id"],
-                        discovered["price_list_id"],
-                    )
-            except Exception as err:
-                _LOGGER.warning("Energa24: auto-discovery failed: %s", err)
-
         # Register callback to persist rotated refresh tokens automatically
         def _persist_rotated_token(new_token: str):
             new_opts = dict(entry.options)
@@ -97,6 +79,26 @@ async def async_setup_entry(
             hass.config_entries.async_update_entry(entry, options=new_opts)
 
         api.set_energa24_token_updated_callback(_persist_rotated_token)
+
+        # Auto-discover IDs in background (don't block sensor setup)
+        if account_id == DEFAULT_ENERGA24_ACCOUNT_ID or price_list_id == DEFAULT_ENERGA24_PRICE_LIST_ID:
+            async def _discover_ids():
+                try:
+                    discovered = await api.async_discover_energa24_ids()
+                    if discovered:
+                        new_opts = dict(entry.options)
+                        new_opts[CONF_ENERGA24_ACCOUNT_ID] = discovered["account_id"]
+                        new_opts[CONF_ENERGA24_PRICE_LIST_ID] = discovered["price_list_id"]
+                        hass.config_entries.async_update_entry(entry, options=new_opts)
+                        _LOGGER.info(
+                            "Energa24: auto-discovered account_id=%s, price_list_id=%s",
+                            discovered["account_id"],
+                            discovered["price_list_id"],
+                        )
+                except Exception as err:
+                    _LOGGER.debug("Energa24: background auto-discovery skipped: %s", err)
+
+            entry.async_create_task(hass, _discover_ids())
 
         _LOGGER.info("Energa24 configured: account=%s, price_list=%s", account_id, price_list_id)
 
@@ -1455,5 +1457,5 @@ class EnergaDynamicPriceSensor(SensorEntity):
             else:
                 _LOGGER.warning("Energa24: No prices received from API")
         except Exception as err:
-            _LOGGER.error("Energa24: Update failed: %s", err)
+            _LOGGER.warning("Energa24: Update failed: %s", err)
             self._attr_available = False

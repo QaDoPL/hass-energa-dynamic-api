@@ -664,11 +664,18 @@ class EnergaAPI:
                     return self._energa24_access_token
                 else:
                     error_text = await resp.text()
-                    _LOGGER.error(
-                        "Failed to refresh Energa24 token (HTTP %d): %s",
-                        resp.status,
-                        error_text,
-                    )
+                    # 400 invalid_grant = token expired/user logged out —
+                    # this is a config issue, not a server error
+                    if resp.status == 400 and "invalid_grant" in error_text:
+                        _LOGGER.warning(
+                            "Energa24 refresh token is invalid — re-enter it in integration options"
+                        )
+                    else:
+                        _LOGGER.error(
+                            "Failed to refresh Energa24 token (HTTP %d): %s",
+                            resp.status,
+                            error_text,
+                        )
                     return None
         except Exception as err:
             _LOGGER.error("Error refreshing Energa24 token: %s", err)
@@ -685,7 +692,7 @@ class EnergaAPI:
         """
         access_token = await self.async_refresh_energa24_token()
         if not access_token:
-            _LOGGER.error("Energa24: cannot discover IDs — no access token")
+            _LOGGER.warning("Energa24: cannot discover IDs — token refresh failed")
             return None
 
         api_headers = {
@@ -800,7 +807,7 @@ class EnergaAPI:
             return None
 
         if not self._energa24_account_id or not self._energa24_price_list_id:
-            _LOGGER.error("Energa24 account_id or price_list_id not configured")
+            _LOGGER.warning("Energa24 account_id or price_list_id not configured")
             return None
 
         today = datetime.now().strftime("%Y-%m-%d")
