@@ -324,7 +324,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
 
         Simplified flow: user only needs to paste the refresh_token.
         Account ID and Price List ID are auto-discovered from the API
-        and validated before saving.
+        when possible, but the token is always saved (even if discovery
+        fails — a background task will retry).
         """
         errors = {}
         if user_input is not None:
@@ -333,9 +334,10 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             if not refresh_token:
                 errors[CONF_ENERGA24_REFRESH_TOKEN] = "empty_token"
             else:
-                # Validate token and auto-discover IDs
+                # Try to auto-discover IDs, but save token regardless
                 import secrets
                 session = aiohttp.ClientSession()
+                discovered = None
                 try:
                     username = self._config_entry.data.get(CONF_USERNAME, "energa24")
                     password = self._config_entry.data.get(CONF_PASSWORD, "")
@@ -348,31 +350,38 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                     api.set_energa24_refresh_token(refresh_token)
 
                     discovered = await api.async_discover_energa24_ids()
-                    if not discovered:
-                        errors["base"] = "energa24_discover_failed"
-                    else:
-                        # Validate by fetching actual prices
+                    if discovered:
                         valid = await api.async_validate_energa24()
                         if not valid:
-                            errors["base"] = "energa24_validate_failed"
-                        else:
-                            new_options = {
-                                **self._config_entry.options,
-                                CONF_ENERGA24_REFRESH_TOKEN: refresh_token,
-                                CONF_ENERGA24_ACCOUNT_ID: discovered["account_id"],
-                                CONF_ENERGA24_PRICE_LIST_ID: discovered["price_list_id"],
-                            }
-                            await api.async_close_energa24_session()
-                            await session.close()
-                            return self.async_create_entry(
-                                title="", data=new_options
+                            _LOGGER.warning(
+                                "Energa24: IDs discovered but price fetch failed — "
+                                "saving anyway, will retry in background"
                             )
                     await api.async_close_energa24_session()
                 except Exception as err:
-                    _LOGGER.warning("Energa24 validation error: %s", err)
-                    errors["base"] = "energa24_validate_failed"
+                    _LOGGER.warning(
+                        "Energa24: discovery/validation skipped during setup: %s", err
+                    )
                 finally:
                     await session.close()
+
+                # Always save the token — even if discovery failed
+                new_options = {
+                    **self._config_entry.options,
+                    CONF_ENERGA24_REFRESH_TOKEN: refresh_token,
+                }
+                if discovered:
+                    new_options[CONF_ENERGA24_ACCOUNT_ID] = discovered["account_id"]
+                    new_options[CONF_ENERGA24_PRICE_LIST_ID] = discovered["price_list_id"]
+                # else: keep existing (or default) IDs
+
+                if not discovered:
+                    _LOGGER.info(
+                        "Energa24: token saved without auto-discovery — "
+                        "background task will retry"
+                    )
+
+                return self.async_create_entry(title="", data=new_options)
 
         current_token = self._config_entry.options.get(CONF_ENERGA24_REFRESH_TOKEN, "")
 
@@ -389,7 +398,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                 "hint": (
                     "Wklej Refresh Token z konsoli przeglądarki (F12 → Application → "
-                    "Local Storage → 24.energa.pl → refresh_token).\n\n"
+                    "Local Storage → 24.energa.pl → kcRefreshToken).\n\n"
                     "Account ID i Price List ID zostaną wykryte automatycznie."
                 ),
             },

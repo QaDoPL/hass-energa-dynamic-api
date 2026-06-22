@@ -677,6 +677,9 @@ class EnergaAPI:
                             error_text,
                         )
                     return None
+        except (aiohttp.ClientError, OSError) as err:
+            _LOGGER.warning("Energa24 token refresh network error: %s", err)
+            return None
         except Exception as err:
             _LOGGER.error("Error refreshing Energa24 token: %s", err)
             return None
