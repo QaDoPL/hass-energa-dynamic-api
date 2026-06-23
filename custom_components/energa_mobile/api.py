@@ -591,7 +591,9 @@ class EnergaAPI:
 
     def set_energa24_refresh_token(self, token: str):
         """Set the refresh token for Energa24 dynamic pricing."""
-        self._energa24_refresh_token = token.strip() if token else None
+        if token:
+            token = token.strip().strip('"').strip("'")
+        self._energa24_refresh_token = token or None
 
     async def _get_energa24_session(self) -> aiohttp.ClientSession:
         """Get or create a dedicated session for Energa24 API (separate cookies)."""
@@ -626,11 +628,12 @@ class EnergaAPI:
 
         _LOGGER.debug("Refreshing Energa24 access token")
         token_url = "https://24.energa.pl/auth/realms/Energa-Selfcare/protocol/openid-connect/token"
-        token = self._energa24_refresh_token.strip()
-        _LOGGER.debug(
-            "Energa24 token refresh: token length=%d, prefix=%s...",
+        token = self._energa24_refresh_token.strip().strip('"').strip("'")
+        _LOGGER.info(
+            "Energa24 token refresh: length=%d, prefix=%s..., suffix=%s",
             len(token),
-            token[:20] if len(token) > 20 else token,
+            token[:25] if len(token) > 25 else token,
+            token[-10:] if len(token) > 10 else "",
         )
         data = {
             "client_id": "energa-selfcare",
