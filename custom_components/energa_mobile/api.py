@@ -591,7 +591,7 @@ class EnergaAPI:
 
     def set_energa24_refresh_token(self, token: str):
         """Set the refresh token for Energa24 dynamic pricing."""
-        self._energa24_refresh_token = token
+        self._energa24_refresh_token = token.strip() if token else None
 
     async def _get_energa24_session(self) -> aiohttp.ClientSession:
         """Get or create a dedicated session for Energa24 API (separate cookies)."""
@@ -626,10 +626,16 @@ class EnergaAPI:
 
         _LOGGER.debug("Refreshing Energa24 access token")
         token_url = "https://24.energa.pl/auth/realms/Energa-Selfcare/protocol/openid-connect/token"
+        token = self._energa24_refresh_token.strip()
+        _LOGGER.debug(
+            "Energa24 token refresh: token length=%d, prefix=%s...",
+            len(token),
+            token[:20] if len(token) > 20 else token,
+        )
         data = {
             "client_id": "energa-selfcare",
             "grant_type": "refresh_token",
-            "refresh_token": self._energa24_refresh_token,
+            "refresh_token": token,
         }
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -637,46 +643,44 @@ class EnergaAPI:
         }
 
         try:
-            e24_session = await self._get_energa24_session()
-            async with e24_session.post(token_url, data=data, headers=headers) as resp:
-                if resp.status == 200:
-                    body = await resp.json()
-                    self._energa24_access_token = body.get("access_token")
-                    expires_in = body.get("expires_in", 300)
-                    self._energa24_token_expires = time.time() + float(expires_in)
+            # Use a FRESH session for token refresh — never reuse the
+            # shared _energa24_session whose cookies (server-cookie, etc.)
+            # can cause Keycloak to reject the request.
+            async with aiohttp.ClientSession() as token_session:
+                async with token_session.post(
+                    token_url, data=data, headers=headers
+                ) as resp:
+                    if resp.status == 200:
+                        body = await resp.json()
+                        self._energa24_access_token = body.get("access_token")
+                        expires_in = body.get("expires_in", 300)
+                        self._energa24_token_expires = time.time() + float(expires_in)
+                        _LOGGER.info("Energa24 access token refreshed (len=%d)", len(self._energa24_access_token or ""))
 
-                    # Token rotation: persist new refresh_token if issued
-                    new_refresh = body.get("refresh_token")
-                    if new_refresh and new_refresh != self._energa24_refresh_token:
-                        _LOGGER.info(
-                            "Energa24: refresh token rotated, persisting new token"
-                        )
-                        self._energa24_refresh_token = new_refresh
-                        if self._energa24_token_updated_cb:
-                            try:
-                                self._energa24_token_updated_cb(new_refresh)
-                            except Exception as cb_err:
-                                _LOGGER.warning(
-                                    "Failed to persist rotated token: %s", cb_err
-                                )
+                        # Token rotation: persist new refresh_token if issued
+                        new_refresh = body.get("refresh_token")
+                        if new_refresh and new_refresh != token:
+                            _LOGGER.info(
+                                "Energa24: refresh token rotated, persisting new token"
+                            )
+                            self._energa24_refresh_token = new_refresh
+                            if self._energa24_token_updated_cb:
+                                try:
+                                    self._energa24_token_updated_cb(new_refresh)
+                                except Exception as cb_err:
+                                    _LOGGER.warning(
+                                        "Failed to persist rotated token: %s", cb_err
+                                    )
 
-                    _LOGGER.info("Energa24 access token refreshed successfully")
-                    return self._energa24_access_token
-                else:
-                    error_text = await resp.text()
-                    # 400 invalid_grant = token expired/user logged out —
-                    # this is a config issue, not a server error
-                    if resp.status == 400 and "invalid_grant" in error_text:
-                        _LOGGER.warning(
-                            "Energa24 refresh token is invalid — re-enter it in integration options"
-                        )
+                        return self._energa24_access_token
                     else:
-                        _LOGGER.error(
-                            "Failed to refresh Energa24 token (HTTP %d): %s",
+                        error_text = await resp.text()
+                        _LOGGER.warning(
+                            "Energa24 token refresh: HTTP %d — %s",
                             resp.status,
-                            error_text,
+                            error_text[:500],
                         )
-                    return None
+                        return None
         except (aiohttp.ClientError, OSError) as err:
             _LOGGER.warning("Energa24 token refresh network error: %s", err)
             return None
